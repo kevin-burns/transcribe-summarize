@@ -103,6 +103,42 @@ platform.
 
 ## Install
 
+Three ways in, depending on what you want.
+
+**As a standalone plugin** — this repo on its own:
+
+```bash
+claude plugin marketplace add kevin-burns/transcribe-summarize
+claude plugin install transcribe-summarize@transcribe-summarize
+```
+
+**As part of the collection** — all the skills, one plugin:
+
+```bash
+claude plugin marketplace add kevin-burns/claude-skills
+claude plugin install claude-skills@kevin-burns
+```
+
+**By hand**, if you would rather not use a marketplace: copy the `transcribe-summarize/`
+directory into `~/.claude/skills/`. Everything the skill needs is inside it.
+
+### Check it actually loaded
+
+Do not take the install command's word for it. This repo has shipped plugin manifests that
+failed **silently** — registering cleanly and listing zero plugins. Verify:
+
+```bash
+claude plugin details transcribe-summarize@transcribe-summarize
+```
+
+You want `Skills (1)  transcribe-summarize` under **Component inventory**. Zero means the
+manifest registered and the skill did not load.
+
+**A trap worth knowing:** `claude --safe-mode` disables plugin-provided skills, so a skill
+installed this way will not appear in a safe-mode session. That is not a broken install.
+
+### Prerequisite
+
 `ffmpeg` and `ffprobe` on PATH:
 
 ```bash

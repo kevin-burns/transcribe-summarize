@@ -26,9 +26,19 @@ entirely: `normalise_transcript.py` turns the `.vtt` into prose and the notes st
 is identical.
 
 ```bash
-./scripts/transcribe.py meeting.mp4                    # audio or video
+# transcribing needs a backend, and the backend comes from --with
+uv run --with 'mlx-whisper>=0.4.2' --script scripts/transcribe.py meeting.mp4
+
+# everything else is stdlib and runs directly
 ./scripts/normalise_transcript.py meeting.vtt          # an existing transcript
+./scripts/notes_check.py notes.md                      # check the notes register
+./scripts/render_pdf.py notes.md                       # notes -> PDF
 ```
+
+**Only `transcribe.py` needs `--with`.** It declares no dependencies of its own, so
+installing this skill does not drag in every engine — the backend you pick brings
+its own library and only when you pick it. Run it without one and it exits 1 with
+the exact command to use. The `--with` spec per backend is in the table below.
 
 A file with **no** audio track — a muted screen recording — is refused before any
 upload is offered, so it is never sent or billed.

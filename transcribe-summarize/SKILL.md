@@ -33,8 +33,8 @@ one selected, so pick it with `uv run --with`:
 |---|---|---|
 | `mlx-whisper` — default on Apple Silicon | macOS arm64 only | `'mlx-whisper>=0.4.2'` |
 | `faster-whisper` — default elsewhere | mac / Windows / Linux | `'faster-whisper>=1.2'` |
-| `parakeet` — opt-in, untested | mac / Windows / Linux | `'nemo_toolkit[asr]'` (multi-GB) |
-| `groq`, `openai` — opt-in, **network** | any | nothing to install |
+| `parakeet` — opt-in | Apple Silicon verified | `'parakeet-mlx'` |
+| `groq`, `openai`, `elevenlabs` — opt-in, **network** | any | nothing to install |
 
 If the library is missing, the error prints the exact command. Don't guess it.
 

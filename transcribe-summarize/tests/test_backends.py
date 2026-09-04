@@ -450,3 +450,23 @@ def test_spacing_entries_do_not_double_the_separator():
     text = el._segments_from_words(words)[0]["text"]
     assert text == "Right. Morning everyone.", f"got {text!r}"
     assert "  " not in text
+
+
+def test_the_documented_with_specs_match_the_registry():
+    """SKILL.md tells the model which `--with` spec to use per backend. It went
+    stale within a day: parakeet moved from nemo_toolkit[asr] to parakeet-mlx and
+    elevenlabs was added, while the table still said otherwise. A wrong spec there
+    is a command that fails for the user, so the table is checked, not trusted."""
+    skill = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text()
+    table = skill[skill.index("`--with` spec"):]
+    table = table[:table.index("\n\n")]
+
+    for name, info in backends.REGISTRY.items():
+        assert name in table, f"{name} is missing from SKILL.md's --with table"
+        if info.pip_spec:
+            assert f"'{info.pip_spec}'" in table, (
+                f"SKILL.md's spec for {name} does not match the registry's {info.pip_spec!r}"
+            )
+
+    for stale in ("nemo_toolkit", "mlx-whisper>=0.4.1"):
+        assert stale not in table, f"SKILL.md still names {stale}"

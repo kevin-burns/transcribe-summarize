@@ -1,0 +1,22 @@
+{
+  "name": "transcribe-summarize",
+  "description": "The transcribe-summarize skill for Claude Code.",
+  "owner": {
+    "name": "Kevin Burns",
+    "url": "https://github.com/kevin-burns"
+  },
+  "plugins": [
+    {
+      "name": "transcribe-summarize",
+      "source": "./",
+      "description": "Transcribe meetings on your own machine across macOS, Windows and Linux, then write them up as factual notes. Filters the segments Whisper invents over silence, trims and normalises the audio before decoding, and maps timestamps back to your own recording. Hosted APIs are opt-in and say what they will send and cost first.",
+      "author": {
+        "name": "Kevin Burns",
+        "url": "https://github.com/kevin-burns"
+      },
+      "homepage": "https://github.com/kevin-burns/transcribe-summarize",
+      "license": "MIT",
+      "category": "Productivity"
+    }
+  ]
+}

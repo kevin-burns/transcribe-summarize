@@ -1,0 +1,17 @@
+{
+  "name": "transcribe-summarize",
+  "version": "1.0.0",
+  "description": "Transcribe meetings on your own machine across macOS, Windows and Linux, then write them up as factual notes. Filters the segments Whisper invents over silence, trims and normalises the audio before decoding, and maps timestamps back to your own recording. Hosted APIs are opt-in and say what they will send and cost first.",
+  "skills": [
+    "./transcribe-summarize"
+  ],
+  "interface": {
+    "displayName": "Transcribe & Summarize",
+    "category": "Productivity",
+    "defaultPrompt": [
+      "Transcribe this recording and write it up as meeting notes",
+      "Turn this Teams .vtt transcript into notes -- there is no audio",
+      "Transcribe this locally, nothing leaves my machine"
+    ]
+  }
+}

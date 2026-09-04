@@ -1,0 +1,87 @@
+{
+  "tool": "transcribe-summarize/scripts/transcribe.py",
+  "description": "A competing tool (markitdown's audio route, speech_recognition.recognize_google) uploaded a user's audio to a third party with nothing in the interface saying so. This eval exists to guarantee that transcribe.py's automatic path can never do that: `resolve(\"auto\")` must never produce a network backend, and any network backend (groq, openai) must disclose provider/endpoint/duration/cost before anything is sent, and only ever because the caller named it explicitly. Cases 1-8 below are argv-driven, run against the real CLI via subprocess, and are asserted by grade.py's `check()`. Two things below are NOT here, by design: (a) cases 9-13 -- the backend-registry matrix across six OS/arch pairs, the parakeet has_whisper_metrics exception, and estimate_cost's None-for-local contract -- live directly in grade.py as pure-Python assertions against tslib.backends, since they take no argv and need no subprocess; (b) case 7, a malformed `--replace` pair, is NOT run through the CLI: transcribe.py validates --replace pairs (corrections.build) only AFTER decoding, which this suite cannot reach offline (no ASR library, no network, no model download), so it is instead asserted as a direct call to tslib.corrections.build() in grade.py, with the reason recorded there and in this file. All argv cases that touch a real file additionally require ffmpeg/ffprobe on PATH (transcribe.py checks for both unconditionally before resolving a backend) -- grade.py detects their absence and SKIPs those cases rather than failing.",
+  "cases": [
+    {
+      "id": "auto-dry-run-is-local",
+      "argv": ["--backend", "auto", "--dry-run"],
+      "needs_audio": true,
+      "expect": {
+        "exit": 0,
+        "stderr_contains": ["would decode locally"],
+        "stderr_not_contains": ["network", "api.groq.com", "api.openai.com"]
+      }
+    },
+    {
+      "id": "groq-dry-run-discloses-egress",
+      "argv": ["--backend", "groq", "--dry-run"],
+      "needs_audio": true,
+      "expect": {
+        "exit": 0,
+        "stderr_contains": [
+          "will send your audio over the network",
+          "provider : groq",
+          "endpoint : api.groq.com",
+          "duration :",
+          "cost     :",
+          "nothing was sent"
+        ]
+      }
+    },
+    {
+      "id": "openai-dry-run-discloses-egress",
+      "argv": ["--backend", "openai", "--dry-run"],
+      "needs_audio": true,
+      "expect": {
+        "exit": 0,
+        "stderr_contains": [
+          "will send your audio over the network",
+          "provider : openai",
+          "endpoint : api.openai.com",
+          "duration :",
+          "cost     :",
+          "nothing was sent"
+        ]
+      }
+    },
+    {
+      "id": "unknown-backend-names-valid-ones",
+      "argv": ["--backend", "nonsense"],
+      "needs_audio": true,
+      "expect": {
+        "exit": 1,
+        "stderr_contains": ["unknown backend", "'nonsense'", "valid backends are:"]
+      }
+    },
+    {
+      "id": "dry-run-json-groq-not-sent",
+      "argv": ["--backend", "groq", "--dry-run", "--json"],
+      "needs_audio": true,
+      "expect": {
+        "exit": 0,
+        "stdout_is_json": true,
+        "json_fields": { "sent": false, "dry_run": true, "backend": "groq" }
+      }
+    },
+    {
+      "id": "missing-input-file",
+      "argv": ["--backend", "auto", "--dry-run"],
+      "needs_audio": false,
+      "use_missing_path": true,
+      "expect": {
+        "exit": 1,
+        "stderr_contains": ["no such file:"]
+      }
+    },
+    {
+      "id": "invalid-guard-value",
+      "argv": ["--guard", "bogus"],
+      "needs_audio": false,
+      "use_missing_path": true,
+      "expect": {
+        "exit_nonzero": true,
+        "stderr_contains": ["--guard", "invalid choice"]
+      }
+    }
+  ]
+}

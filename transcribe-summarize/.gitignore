@@ -1,0 +1,30 @@
+# This directory is in a PUBLIC repository.
+# Audio and anything derived from a real recording must never be committed.
+*.mp3
+*.m4a
+*.wav
+*.aac
+*.flac
+*.mp4
+*.mov
+*.srt
+*.vtt
+# NOT a blanket *.json — that would silently swallow evals/evals.json and any
+# skill metadata. Transcript sidecars are named for their audio file, so they
+# land in these directories instead.
+transcripts/
+recordings/
+out/
+__pycache__/
+.venv/
+.DS_Store
+
+# LOCAL WORKING NOTES -- never published, to this repo or the standalone mirror.
+# These describe field testing done on real client recordings and are internal
+# reasoning, not documentation anyone installing the skill should read. Untracked
+# is the guarantee: the mirror is built from a clean CI checkout, so a file that
+# is not tracked cannot reach it either. Keep them on disk; keep them out of git.
+CLAUDE.md
+HANDOFF.md
+.ruff_cache/
+.pytest_cache/

@@ -130,6 +130,24 @@ refuses word timestamps and speaker labels alongside it, so it would produce no
 **notes** step instead, where it is labelled a summary and checked. See
 `references/backends.md`.
 
+## Audio preparation — on by default, and it matters more than the model
+
+The audio is normalised and silence-trimmed before decoding, and timestamps are
+mapped back to the original clock afterwards. This is the single largest quality
+lever in the tool: cleaning the audio beat reaching for a bigger model.
+
+| flag | what it does |
+|---|---|
+| `--no-normalise` | skip the `loudnorm` pass |
+| `--no-trim` | skip silence removal; keep the original timeline exactly |
+| `--silence-threshold DB` | what counts as silence, default −40 dB |
+| `--min-silence SECONDS` | how long a quiet span must be before it is cut, default 1.0 |
+| `--keep-intermediate` | keep the prepared wav next to the outputs, to listen to |
+
+Reach for `--no-trim` when the user cares about the original timeline more than
+the bill, and for `--keep-intermediate` when a transcript looks wrong and you
+need to hear what the decoder actually got.
+
 ## Another language, and more than one of them
 
 **English out: `--task translate`.** Whisper's second task is `X -> English` and

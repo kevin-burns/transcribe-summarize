@@ -785,3 +785,115 @@ def test_turbo_cannot_translate_on_any_backend_and_is_refused():
             backends.check_task(info, "translate", "mobiuslabsgmbh/faster-whisper-large-v3-turbo")
         # large-v3 is the one that works, so it must still pass.
         backends.check_task(info, "translate", "large-v3")
+
+
+# ----------------------------------------------------- documentation is a gate
+#
+# These exist because the alternative is asking. On 2026-09-06 the questions
+# "is --multilingual in the README" and "does SKILL.md know about it" were both
+# answered by hand, twice, and the answer being yes is not the point -- an answer
+# that has to be re-derived every time is a check that will eventually be skipped.
+#
+# What is mechanical is checked here. What is not -- whether a sentence is still
+# TRUE after a capability changed -- is a human read, and lives in the runbook.
+
+
+def _cli_flags() -> set[str]:
+    """Every long option transcribe.py accepts, read from its own parser."""
+    source = (Path(__file__).resolve().parents[1] / "scripts" / "transcribe.py").read_text()
+    tree = ast.parse(source)
+    flags: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument"):
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and str(arg.value).startswith("--"):
+                    flags.add(str(arg.value))
+    return flags
+
+
+# --help is generated, --dry-run and --yes are about the run rather than the
+# result, and --outdir is where files land. Everything else changes what comes
+# out and so has to be findable by a person and by the model.
+_FLAGS_NEEDING_DOCS = {"--outdir", "--dry-run", "--yes", "--quiet", "--json"}
+
+
+def test_every_cli_flag_is_in_the_readme():
+    """A flag nobody can find is a flag that does not exist. --backend's own help
+    text said 'groq/openai' for a day after elevenlabs shipped."""
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    missing = sorted(f for f in _cli_flags() - _FLAGS_NEEDING_DOCS if f not in readme)
+    assert not missing, f"flags absent from README.md: {missing}"
+
+
+def test_every_result_changing_flag_is_in_skill_md():
+    """SKILL.md is the MODEL's copy. A flag missing here is one the agent will
+    never reach for, however well the README documents it -- and the agent is who
+    runs this skill most of the time."""
+    skill = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text()
+    missing = sorted(f for f in _cli_flags() - _FLAGS_NEEDING_DOCS if f not in skill)
+    assert not missing, f"flags absent from SKILL.md: {missing}"
+
+
+def test_every_backend_appears_in_the_readme_and_the_reference():
+    """Adding a backend to the registry and not to the tables is how the skill
+    ends up shipping a capability nobody knows about."""
+    root = Path(__file__).resolve().parents[1]
+    for doc in ("README.md", "SKILL.md", "references/backends.md"):
+        text = (root / doc).read_text()
+        missing = sorted(name for name in backends.REGISTRY if name not in text)
+        assert not missing, f"backends absent from {doc}: {missing}"
+
+
+def test_a_backend_that_diarizes_is_not_described_as_the_only_one():
+    """The specific sentence that went stale: 'ElevenLabs Scribe: the only backend
+    that knows who spoke', true when written and false the moment Gemini landed.
+    A universal claim is one new backend away from wrong and nothing notices.
+
+    This cannot check truth in general -- it checks the one shape that has
+    already failed, which is what a regression test is for."""
+    reference = (Path(__file__).resolve().parents[1] / "references" / "backends.md").read_text()
+    diarizing = {"elevenlabs", "gemini"}
+    assert len(diarizing) > 1, "premise moved: fewer than two backends diarize"
+    for phrase in ("the only backend that knows who spoke",
+                   "the one place attribution is available",
+                   "the only one of the four that diarizes"):
+        assert phrase not in reference, (
+            f"references/backends.md still claims {phrase!r}, but {sorted(diarizing)} diarize"
+        )
+
+
+def test_gemini_reads_the_text_field_that_actually_exists():
+    """The API reference documents `"output_text": "transcribed text"` at the top
+    level. MEASURED against four live responses on 2026-09-06: that key is absent
+    every time, and the transcript is in steps[].content[].text.
+
+    Falling through to joining our own word-grouped segments would produce a
+    transcript whose punctuation and spacing came from this repo rather than from
+    Gemini -- different in exactly the small ways nobody checks."""
+    real_shape = {
+        "id": "v1_abc", "status": "completed",
+        "steps": [{"content": [{
+            "text": "Guten Morgen. Die Migration ist am Donnerstag fertig geworden.",
+            "annotations": [_gword("Guten", 0.0, 0.4)],
+        }]}],
+    }
+    assert "output_text" not in real_shape
+    assert gm.full_text(real_shape).startswith("Guten Morgen.")
+
+    # Several content blocks are joined in order.
+    assert gm.full_text({"steps": [{"content": [{"text": "One."}, {"text": "Two."}]}]}) == "One. Two."
+
+    # If the documented field ever does appear, it is still honoured.
+    assert gm.full_text({"output_text": "from the documented field"}) == "from the documented field"
+    assert gm.full_text({}) == ""
+
+
+def test_gemini_is_registered_as_unable_to_translate_because_it_was_probed():
+    """Probed three ways on German audio 2026-09-06, not read off a page: the
+    shipped config, language_codes ['en-US'], and a plain text instruction
+    "give the result in English" sent alongside the audio. All three returned the
+    German. language_codes is a hint about what is SPOKEN, not a target."""
+    assert backends.REGISTRY["gemini"].can_translate is False
+    with pytest.raises(backends.UnsupportedOption, match="cannot translate"):
+        backends.check_task(backends.REGISTRY["gemini"], "translate", "gemini-3.5-transcribe")

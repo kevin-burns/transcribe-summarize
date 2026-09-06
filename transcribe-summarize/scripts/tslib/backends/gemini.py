@@ -48,6 +48,16 @@ Verified against ai.google.dev/gemini-api/docs/transcribe, .../docs/files and
 the resumable Files API upload headers, and the
 `steps[].content[].annotations[]` shape with
 `type`/`text`/`speaker`/`start_offset`/`end_offset`.
+
+ONE THING THE REFERENCE GETS WRONG, measured against four live responses on
+2026-09-06: it documents `"output_text": "transcribed text"` at the top level of
+the reply. That key is **absent** -- `payload.get("output_text")` was None every
+time. The transcript is in `steps[].content[].text`. See `full_text()`.
+
+AND GEMINI DOES NOT TRANSLATE, probed three ways on German audio rather than
+taken from the page: the shipped config, `language_codes: ["en-US"]`, and a plain
+text instruction "give the result in English" alongside the audio. All three
+returned the German. `language_codes` really is a hint about what is spoken.
 """
 
 from __future__ import annotations
@@ -277,6 +287,32 @@ def parse_offset(value: object) -> float:
         raise GeminiError(f"could not read a timestamp from {value!r}") from None
 
 
+def full_text(payload: dict) -> str:
+    """The model's own rendering of the transcript.
+
+    NOT `output_text`, which the API reference shows as
+    `"output_text": "transcribed text"` and which is **absent from every real
+    response measured on 2026-09-06** -- `payload.get("output_text")` was None on
+    all four calls made against the live endpoint. The text is in
+    `steps[].content[].text`.
+
+    This matters beyond tidiness: falling through to joining our own segments
+    means the punctuation and spacing come from this file's word-grouper rather
+    than from the model, so the transcript would differ from what Gemini actually
+    produced in exactly the small ways nobody would think to check.
+    """
+    parts: list[str] = []
+    for step in payload.get("steps") or []:
+        for block in (step or {}).get("content") or []:
+            text = (block or {}).get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+    if parts:
+        return " ".join(parts)
+    # Kept as a fallback rather than removed: if the field ever appears, use it.
+    return str(payload.get("output_text") or "").strip()
+
+
 def collect_words(payload: dict) -> list[dict]:
     """Pull every `word_info` annotation out of the interactions envelope.
 
@@ -365,8 +401,7 @@ def transcribe(
 
     result = empty_result("gemini", model)
     result["segments"] = segments_from_words(collect_words(payload))
-    text = str(payload.get("output_text") or "").strip()
-    result["text"] = text or " ".join(s["text"] for s in result["segments"]).strip()
+    result["text"] = full_text(payload) or " ".join(s["text"] for s in result["segments"]).strip()
 
     if progress is not None:
         for segment in result["segments"]:

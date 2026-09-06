@@ -115,10 +115,20 @@ def write_markdown_transcript(result: Result, dest: Path, meta: dict[str, Any]) 
         # throughout -- and a reader who does not know it is a translation will
         # quote it as the speaker's own words. Whisper's translate task is X->English
         # and nothing else, so the wording can be definite.
-        spoken = result.get("language")
+        spoken = str(result.get("language") or "").strip().lower()
+        # MEASURED 2026-09-06: what `language` means on this route depends on the
+        # backend, so it is only quoted when it cannot be the wrong one. A local
+        # Whisper reports the language it DETECTED -- German audio came back "de".
+        # OpenAI's /audio/translations reports the language it PRODUCED -- the same
+        # German audio came back "english", and the header read "the audio is in
+        # english", which was false and looked authoritative. So an English answer
+        # here is discarded: either the audio really was English, in which case
+        # naming it adds nothing to "translated to English", or the endpoint is
+        # reporting its own output and naming it would be a lie.
+        trustworthy = spoken and spoken not in {"en", "eng", "english"}
         facts.append(
             "- **Translated to English.** These are not the words that were spoken"
-            + (f"; the audio is in {spoken}." if spoken else ".")
+            + (f"; the audio is in {spoken}." if trustworthy else ".")
         )
     elif result.get("language"):
         facts.append(f"- Language: {result['language']}")

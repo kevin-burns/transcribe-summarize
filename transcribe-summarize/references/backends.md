@@ -308,6 +308,18 @@ the cap it actually operates under and the one it enforces. The check runs on th
 prepared file before the upload starts, reading the duration from the WAV header
 with stdlib `wave` rather than shelling out to ffprobe.
 
+**The reference is wrong about one field.** It documents `"output_text": "transcribed
+text"` at the top level of the reply. That key was **absent from all four live responses**
+measured on 2026-09-06. The transcript is in `steps[].content[].text`, and `full_text()`
+reads it there; reading the documented field would have fallen through to a transcript this
+repository reassembled from its own word-grouping, differing from Gemini's own punctuation
+in exactly the small ways nobody checks.
+
+**The token rate in the cost table checks out against a real invoice line.** A 6.6 s clip
+reported `input_tokens_by_modality: [{"modality": "audio", "tokens": 166}]` — 25.2 tokens
+per second, against the 25/second the pricing page states and the $0.306/hour derivation
+uses.
+
 **Verified live on 2026-09-06**, not merely documented. `tests/test_gemini_live.py`
 is double-gated (`TS_LIVE_API=1` *and* `GEMINI_API_KEY`) and all five checks pass:
 the two-step upload returns a `files/...` URI, word timestamps arrive as
@@ -350,6 +362,15 @@ in one line: *"whether to perform X->X `transcribe` or X->English `translate`"*.
 Both hosted routes agree -- OpenAI: *"This endpoint supports translation into
 English only."*; Groq: *"The translations endpoint only supports 'en' as a
 parameter option."* All three verified 2026-09-06.
+
+**Gemini genuinely cannot translate, and this was probed rather than read.** It is a
+Gemini model whose headline feature is called "smart transcription", so the natural
+assumption is that asking for English would work. Three attempts on German audio on
+2026-09-06 — the shipped verbatim config, `language_codes: ["en-US"]`, and a plain text
+instruction *"Transcribe this audio and give the result in English"* passed alongside the
+audio with no `transcription_config` at all — returned *"Guten Morgen. Die Migration ist am
+Donnerstag fertig geworden."* every time. `language_codes` is a hint about what is spoken,
+exactly as documented.
 
 **turbo cannot translate and fails silently.** Measured here, not read off a page:
 `--model turbo --task translate` on German audio returned the German, under a

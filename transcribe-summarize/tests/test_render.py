@@ -141,3 +141,40 @@ def test_markdown_transcript_survives_everything_being_suppressed(tmp_path):
         _result(segments), tmp_path / "a.md", {"original_duration": 10.0}
     )
     assert "No speech was retained" in dest.read_text()
+
+
+def test_a_translation_header_never_quotes_english_as_the_source_language():
+    """MEASURED 2026-09-06: OpenAI's /audio/translations returned language
+    "english" for German audio -- it reports what it PRODUCED, not what it heard,
+    which is the opposite of what a local Whisper does. The header then read
+    "the audio is in english", which was false and read as authoritative.
+
+    An English answer is discarded rather than trusted: either the audio really
+    was English, and naming it adds nothing to "translated to English", or the
+    backend is reporting its own output."""
+    import tempfile
+
+    for reported in ("english", "en", "ENG"):
+        result = {
+            "text": "Good morning.", "backend": "openai", "model": "whisper-1",
+            "language": reported,
+            "segments": [{"id": 0, "start": 0.0, "end": 1.0, "text": "Good morning.", "words": []}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "t.md"
+            write_markdown_transcript(result, dest, {
+                "original_duration": 1.0, "task": "translate", "source_name": "t.wav",
+            })
+            body = dest.read_text()
+        assert "Translated to English" in body
+        assert "the audio is in" not in body, f"quoted {reported!r} as the source language"
+
+    # A real detected source, from a local backend, IS quoted -- that is the
+    # whole point of the line.
+    result["language"] = "de"
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "t.md"
+        write_markdown_transcript(result, dest, {
+            "original_duration": 1.0, "task": "translate", "source_name": "t.wav",
+        })
+        assert "the audio is in de." in dest.read_text()

@@ -219,9 +219,12 @@ Three things to know, all of them measured on 2026-09-06:
   unless you pass `--model large-v3`. Groq documents the same for their hosted
   turbo, so it is the model and not the host.
 - **Only Whisper translates.** `parakeet`, `elevenlabs` and `gemini` refuse
-  rather than transcribing and letting you find out later. `groq` and `openai`
-  do it through a different endpoint, `/audio/translations`, English-only by
-  their own documentation.
+  rather than transcribing and letting you find out later — and Gemini's refusal
+  is measured, not assumed: asked three different ways to produce English from
+  German audio, it returned German every time. `groq` and `openai` translate
+  through a different endpoint, `/audio/translations`, English-only by their own
+  documentation; the OpenAI route is verified live, Groq's is not, for want of a
+  key on this machine.
 - **A translated transcript says so, at the top**, because it reads exactly like
   a verbatim one: *"**Translated to English.** These are not the words that were
   spoken; the audio is in de."*
@@ -509,6 +512,7 @@ wrong the first time a real response came back.
 | `elevenlabs` diarization | **live** | two synthesised voices → `speaker_0` / `speaker_1`, format asserted |
 | `gemini` transcribe | **live** | 2 runs, plus 5 live tests |
 | `gemini` diarization | **live** | two voices → `spk:0` / `spk:1`, format asserted |
+| `gemini` cannot translate | **live** | probed three ways on German audio; all returned German |
 | `groq` (any path) | **unrun** | no API key on the machine this was built on |
 
 **The two `unrun` API rows are the honest risk here.** Both are shaped from published
@@ -527,6 +531,14 @@ Three findings that only a live run produced, kept here as the argument for the 
 - **ElevenLabs is not reproducible.** Two identical runs returned different transcripts,
   scoring 8/14 and 12/14; the worse one dropped a budget figure. Nothing in either response
   indicates which you got.
+- **Gemini does not translate**, despite being a Gemini model and despite "smart
+  transcription" sounding like it might. Probed three ways on German audio — the shipped
+  config, `language_codes: ["en-US"]`, and a plain instruction *"give the result in
+  English"* sent alongside the audio. All three returned the German unchanged.
+- **Gemini's documented `output_text` field does not exist.** The API reference shows
+  `"output_text": "transcribed text"` at the top level of the reply; it was absent from all
+  four live responses. The transcript is in `steps[].content[].text`. Reading the documented
+  field would have silently fallen back to text this repository reassembled itself.
 
 ## It produces a draft, not a verified record
 

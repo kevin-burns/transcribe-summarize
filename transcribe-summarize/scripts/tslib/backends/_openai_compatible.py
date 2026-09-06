@@ -283,9 +283,11 @@ def transcribe(
 
     result = empty_result(provider.name, model)
     result["text"] = payload.get("text", "").strip()
-    # On the translations route this is the language that was SPOKEN, not the
-    # language of the text below it, which is always English. transcribe.py
-    # records the task alongside it so the two are never read as one fact.
+    # CAUTION, measured 2026-09-06: on the /audio/translations route this is NOT
+    # the language that was spoken. German audio came back as "english" -- the
+    # endpoint reports what it PRODUCED. A local Whisper reports what it detected.
+    # render.py therefore refuses to quote an English answer here; see the note
+    # beside `trustworthy` there.
     result["language"] = payload.get("language")
 
     segments: list[Segment] = [_to_segment(raw, i) for i, raw in enumerate(payload.get("segments", []))]

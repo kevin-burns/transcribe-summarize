@@ -329,6 +329,52 @@ audio and is not comparable to the measured table in `README.md`, but it is the
 same failure mode every other backend showed on that word — no backend here has
 got it right yet.
 
+## Language: translating, and recordings that change language
+
+| backend | `--task translate` | language change mid-recording |
+|---|---|---|
+| `mlx-whisper` | yes, **`--model large-v3` only** | no -- one detection, first 30 s |
+| `faster-whisper` | yes, **`--model large-v3` only** | **yes**, `--multilingual` |
+| `parakeet` | no | no |
+| `groq` | yes, `whisper-large-v3` only | no |
+| `openai` | yes, `whisper-1` | no |
+| `elevenlabs` | no | no |
+| `gemini` | no | **yes, always** |
+
+**There is no target language, only English.** `mlx_whisper/decoding.py` states it
+in one line: *"whether to perform X->X `transcribe` or X->English `translate`"*.
+Both hosted routes agree -- OpenAI: *"This endpoint supports translation into
+English only."*; Groq: *"The translations endpoint only supports 'en' as a
+parameter option."* All three verified 2026-09-06.
+
+**turbo cannot translate and fails silently.** Measured here, not read off a page:
+`--model turbo --task translate` on German audio returned the German, under a
+transcript header that said "Translated to English". `--model large-v3` on the
+same file returned "Good morning. The migration is finished on Thursday." No
+exception, no warning. Groq's own comparison table marks translation "No" for
+whisper-large-v3-turbo, so it is a property of the distillation rather than of
+any one host, and the registry refuses it on every Whisper backend.
+
+**The single-detection trap, measured.** A 35 s clip, 23 s of German then Spanish:
+
+    without --multilingual   [00:30] und der Prognose war 38.000.
+                                     Wir müssen ihn vor Freitag korrigieren.
+    with    --multilingual   [00:30] y el pronóstico era de 38.000.
+                                     Necesitamos corregirlo antes del viernes.
+
+The Spanish was **translated into German** and nothing said so. faster-whisper's
+own docstring is the fix -- *"multilingual: Perform language detection on every
+segment"* -- and it is the only local engine that has it. On a 13 s clip the flag
+made no difference at all, because the switch fell inside a single 30 s decode
+window; it only matters once the recording is long enough for the second window
+to be a different language, which is exactly when a real call would.
+
+**Refusing, not ignoring.** A backend that cannot honour `--task` or
+`--multilingual` raises `UnsupportedOption` and the run stops. Accepting the flag
+and quietly doing something else would hand back a German transcript to someone
+who asked for English, in a document that reads perfectly well -- the failure
+class this whole skill exists to make visible.
+
 ## Network backends: cost and limits
 
 Per hour of audio, from the providers' own documentation:

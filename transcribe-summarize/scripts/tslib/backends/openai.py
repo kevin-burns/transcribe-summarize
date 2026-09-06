@@ -36,6 +36,7 @@ PROVIDER = oai.Provider(
     env_var=ENV_VAR,
     default_model=DEFAULT_MODEL,
     error=OpenAIError,
+    translate_endpoint="https://api.openai.com/v1/audio/translations",
 )
 
 
@@ -46,5 +47,8 @@ def transcribe(
     language: str | None = None,
     prompt: str | None = None,
     progress: Callable[[Segment], None] | None = None,
+    task: str = "transcribe",
 ) -> Result:
-    return oai.transcribe(PROVIDER, wav, model=model, language=language, prompt=prompt, progress=progress)
+    return oai.transcribe(
+        PROVIDER, wav, model=model, language=language, prompt=prompt, progress=progress, task=task
+    )

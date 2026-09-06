@@ -130,6 +130,35 @@ refuses word timestamps and speaker labels alongside it, so it would produce no
 **notes** step instead, where it is labelled a summary and checked. See
 `references/backends.md`.
 
+## Another language, and more than one of them
+
+**English out: `--task translate`.** Whisper's second task is `X -> English` and
+there is no other target, so this is a task, not a target-language flag.
+
+    ts 'mlx-whisper>=0.4.2' /abs/path/call.m4a --backend mlx-whisper \
+        --model large-v3 --task translate --lang auto
+
+**`--model large-v3` is required.** `turbo` is a distillation that dropped the
+translate task and does **not** error -- measured 2026-09-06, it returned the
+German verbatim when asked for English. Since turbo is the default, the tool
+refuses `--task translate` without an explicit `--model large-v3`. Do not work
+around that; there is no turbo build that translates.
+
+`parakeet`, `elevenlabs` and `gemini` cannot translate at all and refuse. `groq`
+and `openai` can, through a separate `/audio/translations` route, English only.
+
+**A mixed-language recording: `--multilingual`.** Whisper decides the language
+**once, from the first 30 seconds**. On a clip that ran 23 s in German then
+switched to Spanish, the Spanish came back rendered as fluent German, with no
+warning. `--multilingual` re-detects per segment and works on **faster-whisper
+only**; `gemini` does it unconditionally.
+
+**What to tell a user who asks for English notes from a mixed call.** Two steps,
+both of which already exist: `--backend gemini` gives a faithful code-switched
+transcript, then you write the notes in English. Do not reach for `--task
+translate` on a mixed recording -- it can only translate from the one language it
+detected, so the other half is lost twice over.
+
 ## The quality guard
 
 On by default. Suppressed segments stay in the `.json` with the reason and the

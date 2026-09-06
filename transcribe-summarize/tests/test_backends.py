@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import json
 import sys
+import urllib.parse
 import wave
 from pathlib import Path
 
@@ -655,3 +656,132 @@ def test_gemini_missing_key_names_the_variable_not_a_value(monkeypatch):
     with pytest.raises(gm.GeminiError) as excinfo:
         gm._api_key()
     assert "GEMINI_API_KEY" in str(excinfo.value)
+
+
+# ------------------------------------------------- --task and --multilingual
+#
+# The rule these enforce: a backend that cannot honour an option REFUSES it.
+# Accepting --task translate and quietly transcribing hands back German to
+# someone who asked for English, in a document that reads perfectly well. That
+# is the failure this whole skill exists to make visible, so a no-op is a bug.
+
+
+def test_which_backends_can_translate_is_pinned():
+    """Whisper's second task is X->English, so this tracks who serves Whisper --
+    plus Groq and OpenAI, who expose it as a separate /audio/translations route."""
+    able = {name for name, info in backends.REGISTRY.items() if info.can_translate}
+    assert able == {"mlx-whisper", "faster-whisper", "groq", "openai"}, (
+        f"translation-capable set changed to {able}; if a backend gained or lost it, "
+        "confirm against the provider's own documentation and update references/backends.md"
+    )
+
+
+def test_only_faster_whisper_can_re_detect_language_mid_recording():
+    """The capability that decides whether a German-then-Spanish call works.
+    mlx-whisper makes ONE detect_language call, 'using up to the first 30
+    seconds'; faster-whisper documents multilingual as 'Perform language
+    detection on every segment'; Gemini does it unconditionally."""
+    modes = {name: info.multilingual for name, info in backends.REGISTRY.items()}
+    assert modes["faster-whisper"] == "flag"
+    assert modes["gemini"] == "always"
+    assert {n for n, m in modes.items() if m == "no"} == {
+        "mlx-whisper", "parakeet", "groq", "openai", "elevenlabs",
+    }
+
+
+def test_a_backend_that_cannot_translate_refuses_rather_than_transcribing():
+    for name in ("parakeet", "elevenlabs", "gemini"):
+        with pytest.raises(backends.UnsupportedOption, match="cannot translate"):
+            backends.check_task(backends.REGISTRY[name], "translate", "any-model")
+    # And says where to go instead, rather than only saying no.
+    with pytest.raises(backends.UnsupportedOption, match="faster-whisper"):
+        backends.check_task(backends.REGISTRY["gemini"], "translate", "gemini-3.5-transcribe")
+
+
+def test_groq_turbo_cannot_translate_and_is_refused_before_the_upload():
+    """Groq's own comparison table marks translation 'No' for
+    whisper-large-v3-turbo. Discovering that as an HTTP error would mean the
+    audio had already been uploaded and billed."""
+    groq_info = backends.REGISTRY["groq"]
+    with pytest.raises(backends.UnsupportedOption, match="whisper-large-v3"):
+        backends.check_task(groq_info, "translate", "whisper-large-v3-turbo")
+    backends.check_task(groq_info, "translate", "whisper-large-v3")  # must not raise
+
+
+def test_transcribe_is_always_allowed_and_a_bad_task_is_named():
+    for info in backends.REGISTRY.values():
+        backends.check_task(info, "transcribe", info.default_model)
+    with pytest.raises(backends.UnsupportedOption, match="unknown --task"):
+        backends.check_task(backends.REGISTRY["mlx-whisper"], "summarise", "turbo")
+
+
+def test_the_single_detection_warning_fires_when_multilingual_was_NOT_asked_for():
+    """The important case is the silent one. A user who does not know Whisper
+    decides the language once needs telling before they read a fluent transcript
+    of the wrong language."""
+    note = backends.check_multilingual(backends.REGISTRY["mlx-whisper"], False)
+    assert note and "ONCE" in note and "first 30 seconds" in note
+
+    # faster-whisper can be told to do better, so it gets no scary note by default.
+    assert backends.check_multilingual(backends.REGISTRY["faster-whisper"], False) is None
+    assert backends.check_multilingual(backends.REGISTRY["faster-whisper"], True) is None
+
+    # Gemini always does it, so the note says the flag is redundant, not refused.
+    always = backends.check_multilingual(backends.REGISTRY["gemini"], True)
+    assert always and "already in effect" in always
+
+
+def test_multilingual_is_refused_where_it_cannot_be_honoured():
+    for name in ("mlx-whisper", "parakeet", "groq", "openai", "elevenlabs"):
+        with pytest.raises(backends.UnsupportedOption, match="cannot re-detect"):
+            backends.check_multilingual(backends.REGISTRY[name], True)
+
+
+def test_translation_goes_to_a_different_url_on_the_same_host():
+    """It is a separate endpoint, not a parameter, on both OpenAI-compatible
+    hosts. The host must not change: the egress disclosure already named it."""
+    for provider in (groq.PROVIDER, openai.PROVIDER):
+        transcribe_path = provider.path_for("transcribe")
+        translate_path = provider.path_for("translate")
+        assert translate_path.endswith("/audio/translations")
+        assert transcribe_path.endswith("/audio/transcriptions")
+        assert translate_path != transcribe_path
+        assert urllib.parse.urlparse(provider.translate_endpoint).netloc == provider.host
+
+
+def test_language_is_not_sent_on_the_translations_route(tmp_path):
+    """`language` means the OUTPUT language there, and Groq documents that it
+    'only supports en'. Forwarding --lang de would be rejected, or honoured as a
+    request to translate into German, which neither host can do."""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF....WAVE")
+
+    translating = oai.build_request(
+        groq.PROVIDER, wav, model="whisper-large-v3", language="de", prompt=None,
+        key="decoy", task="translate",
+    )
+    assert b'name="language"' not in translating.body
+
+    transcribing = oai.build_request(
+        groq.PROVIDER, wav, model="whisper-large-v3", language="de", prompt=None,
+        key="decoy", task="transcribe",
+    )
+    assert b'name="language"' in transcribing.body
+
+
+def test_turbo_cannot_translate_on_any_backend_and_is_refused():
+    """MEASURED 2026-09-06, and this is why the check exists rather than trusting
+    the library: `--model turbo --task translate` on German audio returned the
+    German verbatim, under a transcript header that said "Translated to English".
+    It does not raise, it does not warn, it just ignores the task. large-v3 on the
+    same file returned "Good morning...". Groq documents the same for their hosted
+    turbo, so it is a property of the model and not of the host."""
+    for name in ("mlx-whisper", "faster-whisper"):
+        info = backends.REGISTRY[name]
+        assert info.default_model == "turbo", "the default changed; this test's premise moved"
+        with pytest.raises(backends.UnsupportedOption, match="silently returns the original"):
+            backends.check_task(info, "translate", "turbo")
+        with pytest.raises(backends.UnsupportedOption, match="Use --model large-v3"):
+            backends.check_task(info, "translate", "mobiuslabsgmbh/faster-whisper-large-v3-turbo")
+        # large-v3 is the one that works, so it must still pass.
+        backends.check_task(info, "translate", "large-v3")

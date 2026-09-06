@@ -36,6 +36,8 @@ __all__ = [
     "BackendInfo",
     "MissingDependency",
     "UnknownBackend",
+    "check_multilingual",
+    "check_task",
     "estimate_cost",
     "load",
     "resolve",
@@ -54,6 +56,36 @@ class BackendInfo:
     platforms: tuple[str, ...]  # "<sys.platform>-<platform.machine()>" pairs, or ("any",)
     default_model: str
     notes: str
+
+    # TRANSLATION. Whisper's second task is X->English and nothing else --
+    # mlx_whisper/decoding.py says so in one line: 'whether to perform X->X
+    # "transcribe" or X->English "translate"'. So this is a boolean, not a target
+    # language, and it will stay one until a backend appears that can aim
+    # somewhere other than English.
+    can_translate: bool = False
+    # Empty means every model this backend offers can translate. Non-empty is the
+    # exception Groq forces: whisper-large-v3 translates and whisper-large-v3-turbo
+    # does not, which their own comparison table says outright, so asking turbo to
+    # translate has to be refused here rather than discovered as an API error.
+    translate_models: tuple[str, ...] = ()
+    # Substrings that DISQUALIFY a model from translating, for backends that take
+    # an open-ended model name and so cannot be covered by an allow-list.
+    # "turbo" is here because large-v3-turbo is a distillation that DROPPED the
+    # translate task, and it does not error -- it silently transcribes. Measured
+    # 2026-09-06 on German audio: --model turbo --task translate returned "Guten
+    # Morgen..." under a header saying "Translated to English", while --model
+    # large-v3 on the same file returned "Good morning...". Groq documents the
+    # same thing for their hosted turbo, so it is the model, not the host.
+    translate_excludes: tuple[str, ...] = ()
+
+    # CODE-SWITCHING within one recording.
+    #   "no"     detects the language once and applies it to the whole file
+    #   "flag"   can re-detect per segment, when asked
+    #   "always" does it unconditionally and cannot be turned off
+    # This matters more than it looks: Whisper decides the language from the first
+    # 30 seconds, so a call that opens in German and switches to Spanish is decoded
+    # entirely as German, and the output does not say so.
+    multilingual: Literal["no", "flag", "always"] = "no"
     # One extra line printed inside the egress disclosure, for a provider
     # whose terms the user is agreeing to and cannot see from here (Gemini
     # stores the upload for 48 hours). None for everything else.
@@ -69,6 +101,9 @@ REGISTRY: dict[str, BackendInfo] = {
         has_whisper_metrics=True,
         platforms=("darwin-arm64",),
         default_model="turbo",
+        can_translate=True,
+        translate_excludes=("turbo",),
+        multilingual="no",  # one detect_language call, "using up to the first 30 seconds"
         notes="Apple Silicon only -- MLX does not run on Intel Macs or non-Apple hardware.",
     ),
     "faster-whisper": BackendInfo(
@@ -79,6 +114,10 @@ REGISTRY: dict[str, BackendInfo] = {
         has_whisper_metrics=True,
         platforms=("any",),
         default_model="turbo",
+        can_translate=True,
+        translate_excludes=("turbo",),
+        # The ONLY backend here that can re-detect the language per segment.
+        multilingual="flag",
         notes="CTranslate2, no torch dependency. The cross-platform local default.",
     ),
     "parakeet": BackendInfo(
@@ -103,6 +142,9 @@ REGISTRY: dict[str, BackendInfo] = {
         has_whisper_metrics=True,
         platforms=("any",),
         default_model="whisper-large-v3",
+        can_translate=True,
+        # Groq's own comparison table marks translation "No" for turbo.
+        translate_models=("whisper-large-v3",),
         notes=(
             "Opt-in only: reachable exclusively via explicit --backend groq, never from "
             "'auto'. Hosts Whisper, so verbose_json returns the full metric set. "
@@ -140,6 +182,10 @@ REGISTRY: dict[str, BackendInfo] = {
         has_whisper_metrics=False,
         platforms=("any",),
         default_model="gemini-3.5-transcribe",
+        can_translate=False,
+        # "Handles intra-sentence and inter-sentential code-switching without manual
+        # configuration" -- unconditional, so there is nothing for a flag to switch.
+        multilingual="always",
         notes=(
             "Opt-in only. The one backend here that uploads in TWO steps: the audio goes to "
             "the Files API first and the transcription request carries only the returned URI. "
@@ -161,6 +207,8 @@ REGISTRY: dict[str, BackendInfo] = {
         has_whisper_metrics=True,
         platforms=("any",),
         default_model="whisper-1",
+        can_translate=True,
+        translate_models=("whisper-1",),
         notes=(
             "Opt-in only: reachable exclusively via explicit --backend openai, never from "
             "'auto'. Reads OPENAI_API_KEY from the environment; never accepts a key as a flag."
@@ -199,6 +247,77 @@ class UnknownBackend(ValueError):
 
 class MissingDependency(RuntimeError):
     """Raised by load() when a backend's third-party import is not installed."""
+
+
+class UnsupportedOption(ValueError):
+    """Raised when a backend cannot honour --task or --multilingual.
+
+    REFUSING IS THE POINT. Accepting the flag and quietly ignoring it would hand
+    back a German transcript to someone who asked for English, or a
+    single-language decode to someone who said the call was mixed -- in both
+    cases a document that reads fine and is not what was asked for. That is the
+    exact failure this skill exists to make visible, so an unhonourable option is
+    an error, never a no-op.
+    """
+
+
+def check_task(info: BackendInfo, task: str, model: str) -> None:
+    """Validate --task against a backend and its model. Raises UnsupportedOption."""
+    if task == "transcribe":
+        return
+    if task != "translate":
+        raise UnsupportedOption(f"unknown --task {task!r}; use 'transcribe' or 'translate'")
+
+    able = sorted(name for name, entry in REGISTRY.items() if entry.can_translate)
+    if not info.can_translate:
+        raise UnsupportedOption(
+            f"--backend {info.name} cannot translate; it only transcribes what was said. "
+            f"Backends that translate to English: {', '.join(able)}. "
+            f"For a mixed-language recording, {info.name} may still be the better transcriber -- "
+            f"take the transcript in the spoken languages and write the notes in English."
+        )
+    excluded = next((bad for bad in info.translate_excludes if bad in model), None)
+    if excluded is not None:
+        raise UnsupportedOption(
+            f"{info.name} model {model!r} cannot translate. large-v3-turbo is a distillation "
+            f"that dropped the translate task, and it does not fail -- it silently returns the "
+            f"original language under a header claiming English. Use --model large-v3."
+        )
+    if info.translate_models and model not in info.translate_models:
+        raise UnsupportedOption(
+            f"{info.name} model {model!r} cannot translate; use "
+            f"--model {info.translate_models[0]}. "
+            f"(Only {', '.join(info.translate_models)} supports the translations endpoint.)"
+        )
+
+
+def check_multilingual(info: BackendInfo, want: bool) -> str | None:
+    """Validate --multilingual. Returns a note to print, or raises UnsupportedOption.
+
+    A returned string is not a warning about the flag -- it is the thing the user
+    needs to know either way, including when they did NOT pass it.
+    """
+    if info.multilingual == "always":
+        return (
+            f"{info.name} detects language per utterance and cannot be told not to, "
+            f"so --multilingual is already in effect."
+        )
+    if not want:
+        if info.multilingual == "no":
+            return (
+                f"{info.name} detects the language ONCE, from the first 30 seconds, and applies it "
+                f"to the whole recording. If this audio changes language part-way, that part will "
+                f"be decoded as the first language and the transcript will not say so."
+            )
+        return None
+    if info.multilingual == "flag":
+        return None
+    able = sorted(n for n, e in REGISTRY.items() if e.multilingual in ("flag", "always"))
+    raise UnsupportedOption(
+        f"--backend {info.name} cannot re-detect the language during a recording; it decides once "
+        f"from the first 30 seconds. Backends that handle a language change mid-recording: "
+        f"{', '.join(able)}."
+    )
 
 
 def _local_default(system: str, machine: str) -> BackendInfo:

@@ -149,6 +149,38 @@ def check_registry() -> list[tuple[str, bool]]:
             backends.REGISTRY[name].has_whisper_metrics is True,
         ))
 
+    # 13-16: --task and --multilingual must REFUSE where they cannot be honoured.
+    # Accepting either and quietly doing something else returns a document that
+    # reads correctly and is not what was asked for.
+    able = {n for n, i in backends.REGISTRY.items() if i.can_translate}
+    results.append((
+        f"backends that translate are exactly {{mlx-whisper, faster-whisper, groq, openai}} "
+        f"(got {sorted(able)})",
+        able == {"mlx-whisper", "faster-whisper", "groq", "openai"},
+    ))
+    try:
+        backends.check_task(backends.REGISTRY["gemini"], "translate", "gemini-3.5-transcribe")
+        refused_gemini = False
+    except backends.UnsupportedOption:
+        refused_gemini = True
+    results.append(("--task translate on gemini is refused, not ignored", refused_gemini))
+
+    # turbo is the DEFAULT model on both Whisper backends and cannot translate:
+    # measured returning the source language under an "English" header.
+    try:
+        backends.check_task(backends.REGISTRY["mlx-whisper"], "translate", "turbo")
+        refused_turbo = False
+    except backends.UnsupportedOption:
+        refused_turbo = True
+    results.append(("--task translate on the default turbo model is refused", refused_turbo))
+
+    multi = {n for n, i in backends.REGISTRY.items() if i.multilingual != "no"}
+    results.append((
+        f"backends handling a mid-recording language change are exactly "
+        f"{{faster-whisper, gemini}} (got {sorted(multi)})",
+        multi == {"faster-whisper", "gemini"},
+    ))
+
     # 13: cost estimate rounds correctly for a priced network model, and is None
     # (not 0, not free) for a local backend -- callers must treat None as
     # "cannot estimate".

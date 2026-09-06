@@ -1,0 +1,114 @@
+{
+  "_comment": [
+    "The twelve accuracy checks, written down 2026-09-06 so a score can be RECOMPUTED.",
+    "",
+    "They existed before as a sentence in README.md -- 'technical proper nouns, an invented",
+    "surname, four figures and a date, two spoken self-corrections, and one near-homophone",
+    "pair' -- which does not add up to twelve and cannot be re-run. Every N/12 in that table",
+    "was therefore unreproducible, which is what claude-skills-luwe was filed for.",
+    "",
+    "The audio is NOT in this repository and must not be: it lives outside, and score.py takes",
+    "a path to a transcript. It is a scripted 2 min 19 s read by one speaker into a laptop",
+    "microphone, with a fictional company and an invented surname, so nothing here discloses",
+    "anything. Regenerate the transcripts with scripts/transcribe.py, then run score.py.",
+    "",
+    "A check has `expect` (must match) and optionally `reject` (must not match). Both are",
+    "case-insensitive regexes over the transcript body. `reject` exists because several of",
+    "these fail by producing a PLAUSIBLE wrong string rather than by producing nothing --",
+    "'terror grunt' for Terragrunt, 'board packs up' for board pack -- and an expect-only",
+    "check scores those as a simple miss rather than as the confident error they are."
+  ],
+  "source": {
+    "description": "scripted meeting, one speaker, laptop built-in microphone, real room",
+    "duration_seconds": 138.675,
+    "sha256_note": "hash the file you use and record it in the results, so a later run is comparable"
+  },
+  "checks": [
+    {
+      "id": "terragrunt",
+      "kind": "proper-noun",
+      "expect": "\\bTerragrunt\\b",
+      "reject": "\\bterror\\s+grunt\\b",
+      "note": "The single hardest token here. Fails as 'terror grunt', which reads as words."
+    },
+    {
+      "id": "eks",
+      "kind": "proper-noun",
+      "expect": "\\bEKS\\b",
+      "note": "Three letters, spoken. Confusable with AKS in the same sentence."
+    },
+    {
+      "id": "aks",
+      "kind": "proper-noun",
+      "expect": "\\bAKS\\b",
+      "note": "The pair matters: the sentence says EKS moves and AKS stays. Swapping them inverts it."
+    },
+    {
+      "id": "cloudflare-access",
+      "kind": "proper-noun",
+      "expect": "\\bCloudflare\\s+access\\b",
+      "note": "Two words, a product name, said once."
+    },
+    {
+      "id": "postgres",
+      "kind": "proper-noun",
+      "expect": "\\bPostgres\\b",
+      "note": "Said twice in one sentence, so a backend that drops one still passes."
+    },
+    {
+      "id": "raghunathan",
+      "kind": "invented-surname",
+      "expect": "\\bRaghunathan\\b",
+      "note": "Invented, so no backend has it memorised. The speaker even says it comes up wrong every time."
+    },
+    {
+      "id": "northwind",
+      "kind": "invented-company",
+      "expect": "\\bNorthwind\\b",
+      "note": "Fails as 'north wind', which is why it is the --replace example in the README."
+    },
+    {
+      "id": "figure-units",
+      "kind": "figure",
+      "expect": "\\b18\\b",
+      "note": "18 units off the old root configuration."
+    },
+    {
+      "id": "figure-budget",
+      "kind": "figure",
+      "expect": "42[,.]?300",
+      "note": "42,300 euros. A four-figure-plus number with a separator, so formatting varies legitimately."
+    },
+    {
+      "id": "figure-forecast",
+      "kind": "figure",
+      "expect": "38[,.]?000",
+      "note": "Against a forecast of 38,000. Paired with the above; the overrun is the difference."
+    },
+    {
+      "id": "date-november",
+      "kind": "date",
+      "expect": "14(th)?\\s+(of\\s+)?November",
+      "note": "Spoken as 'the fourteenth of November'. A date is the thing a reader acts on."
+    },
+    {
+      "id": "self-correction-eks",
+      "kind": "self-correction",
+      "expect": "(sorry|correction|not right|that's wrong)",
+      "note": "The speaker corrects himself about which cluster moves. Dropping the correction leaves a confident wrong statement."
+    },
+    {
+      "id": "near-homophone-uptime",
+      "kind": "near-homophone",
+      "expect": "99\\.95",
+      "note": "99.95% versus 99.5% in the same breath. mlx-whisper large-v3 rendered this as '99.5%, not Not 99.5%' -- it dropped the correction AND the distinguishing figure."
+    },
+    {
+      "id": "board-pack",
+      "kind": "near-homophone",
+      "expect": "\\bboard\\s+pack\\b",
+      "reject": "\\bboard\\s+packs\\s+up\\b",
+      "note": "EVERY backend measured so far fails this one, producing 'board packs up'. Kept in the set precisely because it is the case no threshold catches: it is grammatical, fluent and wrong."
+    }
+  ]
+}

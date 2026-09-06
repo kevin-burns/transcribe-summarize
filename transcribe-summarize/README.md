@@ -195,7 +195,63 @@ Useful flags:
 --no-trim / --no-normalise        turn off audio preparation
 --keep-intermediate               keep the prepared wav to listen to
 --dry-run                         say what would happen; decode nothing
+--task translate                  output English instead of the spoken language
+--multilingual                    re-detect the language on every segment
 ```
+
+### Another language, and more than one of them
+
+**`--task translate` gives you English.** Whisper has a second task built in and
+it is `X -> English` — there is no other target, which is why this is a task and
+not a `--target-lang`. Verified in `mlx_whisper/decoding.py`, whose own comment
+reads *"whether to perform X->X `transcribe` or X->English `translate`"*.
+
+```bash
+uv run --with 'mlx-whisper>=0.4.2' --script scripts/transcribe.py call.m4a \
+    --backend mlx-whisper --model large-v3 --task translate --lang auto
+```
+
+Three things to know, all of them measured on 2026-09-06:
+
+- **`turbo` cannot translate, and does not say so.** `large-v3-turbo` is a
+  distillation that dropped the task. Asked to translate German it returned the
+  German, silently. Since turbo is the default, `--task translate` **refuses**
+  unless you pass `--model large-v3`. Groq documents the same for their hosted
+  turbo, so it is the model and not the host.
+- **Only Whisper translates.** `parakeet`, `elevenlabs` and `gemini` refuse
+  rather than transcribing and letting you find out later. `groq` and `openai`
+  do it through a different endpoint, `/audio/translations`, English-only by
+  their own documentation.
+- **A translated transcript says so, at the top**, because it reads exactly like
+  a verbatim one: *"**Translated to English.** These are not the words that were
+  spoken; the audio is in de."*
+
+**`--multilingual` is for a recording that changes language part-way.** Whisper
+decides the language **once, from the first 30 seconds**, and applies it to the
+rest of the file. Here is what that costs, on a 35 s clip that runs 23 s in
+German and then switches to Spanish:
+
+```
+without --multilingual   [00:00:30]  und der Prognose war 38.000.
+                                     Wir müssen ihn vor Freitag korrigieren.
+
+with    --multilingual   [00:00:30]  y el pronóstico era de 38.000.
+                                     Necesitamos corregirlo antes del viernes.
+```
+
+The Spanish came back **as German**. Not garbled — translated, fluently, with no
+warning anywhere in the output. That is the failure this whole tool is built to
+surface, so the tool now prints the single-detection caveat on every run of a
+backend that cannot do better, whether or not you passed the flag.
+
+`--multilingual` works on **`faster-whisper` only** — it is the one engine here
+that re-runs detection per segment. `gemini` does it unconditionally and says so.
+Everything else refuses the flag rather than accepting and ignoring it.
+
+For a genuinely mixed call, the combination that works today is `--backend
+gemini` for a faithful code-switched transcript, then **English notes** at the
+summary step. Translation is an edit, and edits belong in the summary rather than
+in a record of what was said.
 
 ## Backends
 
@@ -222,84 +278,94 @@ transcript. Parakeet has also never been run against a real NeMo install — see
 
 ## What these backends actually did
 
-Measured on 2026-09-04, Apple M1 Pro / 16 GB / macOS 26.6.2 / ffmpeg 9.0.1, on a
-**real 2 min 19 s recording made with a laptop's built-in microphone** — one
-speaker, a real room, no processing applied before the tool saw it. Model weights
-were already cached, so no download time is included. Silence-trimming removed
-19 s (14%) before decoding, identically for every backend.
+Re-measured **2026-09-06** on an Apple M1 Pro / 16 GB / macOS 26.6.2 / ffmpeg 9.0.1,
+against a **2 min 19 s recording made with a laptop's built-in microphone** — one
+speaker, a real room, nothing done to it before the tool saw it. Model weights
+were already cached. Silence-trimming removed 18.9 s of 138.7 s (13.6%) before
+decoding, identically for every backend.
 
-| backend | model | decode | accuracy | notable failure |
+**Accuracy is now a score you can recompute.** The fourteen checks live in
+`evals/accuracy/checks.json` and `evals/accuracy/score.py` scores a transcript
+against them. The previous version of this table said `N / 12` against a
+checklist that was never written down, so no figure in it could be confirmed or
+refuted; that is what these files exist to prevent. The set turned out to be
+fourteen, not twelve, and it is not trimmed to match a number nobody derived.
+
+Local backends ran three times, network backends twice.
+
+| backend | model | accuracy | decode, median (range) | what it got wrong |
 |---|---|---|---|---|
-| `openai` | whisper-1 | 9.8 s | **11 / 12** | — |
-| `elevenlabs` | scribe_v2 | 20 s | **10 / 12** | "obviously" → "absolute" |
-| `mlx-whisper` | **large-v3-turbo** (now default) | 13.8 s | 9 / 12 | "Terragrunt" → "terror grunt" |
-| `faster-whisper` | large-v3 | 53.9 s | 9 / 12 | "Terragrunt", "the AKS ones" |
-| `parakeet` | parakeet-tdt-0.6b-v3 | 12.5 s | 8 / 12 | "Raghunathan", "Terragrunt" |
-| `mlx-whisper` | large-v3 (was default) | 21.5 s | 8 / 12 | **dropped a spoken self-correction** |
+| `openai` | whisper-1 | **13 / 14** | 10.1 s (9.6–10.6) | board pack |
+| `gemini` | gemini-3.5-transcribe | 12 / 14 | 11.5 s (11.4–11.6) | Terragrunt, board pack |
+| `mlx-whisper` | **turbo** (default) | 12 / 14 | 14.5 s (13.4–15.5) | Terragrunt, board pack |
+| `faster-whisper` | **turbo** (default) | 12 / 14 | 24.2 s (24.1–24.6) | Terragrunt, board pack |
+| `parakeet` | parakeet-tdt-0.6b-v3 | 11 / 14 | 13.3 s (13.1–18.9) | Terragrunt, Raghunathan, board pack |
+| `mlx-whisper` | large-v3 | 11 / 14 | 22.0 s (21.1–23.2) | AKS, 99.95% vs 99.5%, board pack |
+| `faster-whisper` | large-v3 | 11 / 14 | 69.5 s (62.6–78.2) | Terragrunt, AKS, board pack |
+| `elevenlabs` | scribe_v2 | **8 / 14** and 12 / 14 | 9.5 s (9.5–9.6) | varies — see below |
 
-**What that table is and is not, re-checked 2026-09-06.** Every eval run this
-project has ever made used one source file, named in every `run.json`, and it is
-still on disk at 2 min 18.7 s — so the recording is the one described above.
-Verified against the saved manifests: silence-trimming removed **18.9 s of
-138.7 s, 13.6%**, matching the "19 s (14%)" claimed. The guard suppressed nothing
-on any backend. Scribe's "obviously" → "absolute", turbo's "Terragrunt" → "terror
-grunt", and Parakeet missing both "Raghunathan" and "Terragrunt" all reproduce in
-the saved transcripts.
+**Read the decode column as an order of magnitude, not a benchmark.** The range is
+there because the same model on the same file moves: `faster-whisper large-v3`
+spanned 62.6–78.2 s across three runs, a 25% spread. Two rows separated by less
+than a few seconds are not separated.
 
-Two caveats the table does not carry on its own, both earned by going back to the
-manifests rather than trusting the numbers:
+**ElevenLabs returned a different transcript on each of two identical runs**, and
+the scores were 8 and 12. The worse run dropped a budget figure the better one
+kept. Every other backend here scored the same on every run. That is worth more
+than the score itself: a backend whose output is not stable is one you cannot
+diff against yesterday's, and nothing in the response says which run you got.
 
-- **Decode times are single runs and move a lot.** The same model on the same
-  file was recorded at 10.4 s, 12.4 s and 15.1 s across three saved runs of
-  `whisper-1` — a 46% spread. Read the column as an order of magnitude, not as a
-  benchmark, and do not compare two rows that differ by less than a few seconds.
-- **The per-backend `N / 12` scores are not reproducible from anything saved.**
-  The twelve-item checklist was never written down, so the scores cannot be
-  recomputed, and one attribution does not survive the check: the only
-  `faster-whisper large-v3` run on disk transcribes "Terragrunt" **correctly**,
-  while the "terror grunt" error at that backend belongs to `turbo`. Tracked in
-  `claude-skills-luwe` along with a re-measurement.
-
-The twelve checks are specific things in the audio that are known to be hard:
-technical proper nouns (Terragrunt, EKS/AKS, Cloudflare Access, Postgres), an
-invented surname, four figures and a date, two spoken self-corrections, and one
-near-homophone pair (99.95% versus 99.5%).
+**Every backend fails "board pack", every time.** All eight rows, both the local
+and the hosted ones, render it as "board packs up". It is grammatical, it is
+fluent, and it is wrong — which is exactly why the check is kept in the set and
+why the transcript ships with a "Worth checking" section instead of a claim to be
+correct.
 
 ### What the numbers actually say
 
 **The old default was the worst Whisper result here, so the default changed.**
-`large-v3` scored below `large-v3-turbo` while taking 56% longer, and its failure
-was the serious kind:
-the speaker corrected himself mid-sentence — "oh, actually, correction, that was
-99.95%" — and `large-v3` **dropped the correction entirely**, rendering the
-sentence as "99.5%, not Not 99.5%". Every other backend kept it. In a document
-meant to record what was said, silently losing a speaker's correction of a figure
-is the worst available failure.
+`large-v3` scored 11/14 against turbo's 12/14 while taking 52% longer (22.0 s
+against 14.5 s), and its failure was the serious kind: the speaker corrects
+himself mid-sentence — "oh, actually, correction, that was 99.95%" — and
+`large-v3` renders the figure as "99.5%, not Not 99.5%". It keeps the word
+"correction" and loses the number the correction was about, which is worse than
+dropping the sentence, because what survives reads like a correction that was
+captured. In a document meant to record what was said, that is the worst
+available failure.
 
-**Both Whisper backends therefore now default to `turbo`.** `--model large-v3` is
-still there if you want it.
+**Both Whisper backends therefore default to `turbo`.** `--model large-v3` is
+still there. Note that turbo **cannot translate** — see `--task` below — so
+`--task translate` requires `--model large-v3`.
 
 One recording is not a benchmark, and this does not establish that turbo beats
 large-v3 in general. It does mean the common claim that large-v3 is worth its
 extra time on accented English is **not supported by the only real measurement
-this project has**, which is enough to stop making it the thing people pay for by
-default. If large-v3 is better on your audio, measure it and use it.
+this project has**. If large-v3 is better on your audio, measure it and use it.
 
 (`faster-whisper` resolves `turbo` to `mobiuslabsgmbh/faster-whisper-large-v3-turbo`
 rather than a Systran repo — a different publisher from its other short names.
-Measured at 50.7 s here, barely faster than its large-v3, because the bottleneck
-is CPU inference rather than model size.)
+It ran at 24.2 s here. An earlier run of the same configuration recorded 50.7 s,
+which is the clearest single illustration of why the decode column carries a
+range: nothing about the model changed between them.)
 
-**Nothing recovered "board pack"** — all six heard "board packs up". Some errors
-are in the audio, not the model.
+**Nothing recovered "board pack".** All eight rows heard "board packs up". Some
+errors are in the audio, not the model.
 
-**Scribe was the best of the non-OpenAI backends**, and the only one besides
-`large-v3` and OpenAI to get "Terragrunt". It also transcribed the speaker's
-misread *and* the correction that followed it — "not nineteen nine point five…
-oh actually correction, that was ninety-nine point nine five" — where `large-v3`
-dropped the correction entirely. It produced the fewest, longest segments (10,
-against 15–25), which reads better as prose and matters if anything downstream
-assumes a segment is a fixed unit.
+**Terragrunt split the field three to five.** `openai`, `mlx-whisper large-v3`
+and `elevenlabs` got it; `gemini`, both turbo builds, `faster-whisper large-v3`
+and `parakeet` produced "terror grunt" — two ordinary words, which is why no
+confidence threshold flags it.
+
+**Two backends lost the 99.95% distinction**: `mlx-whisper large-v3` and
+`elevenlabs`. Every other row kept it. All eight kept the *word* "correction",
+which is the trap — a transcript can preserve the fact that a correction happened
+and still get the corrected value wrong.
+
+**Scribe produced the fewest, longest segments** — 10, against 12 for Gemini, 15
+for OpenAI and 20–25 for the rest. That reads better as prose and matters if
+anything downstream assumes a segment is a fixed unit. It is also the backend
+whose output was not reproducible between runs, so treat the segment count as
+descriptive of one run.
 
 Its diarization returned one speaker here, correctly: this is a single-speaker
 recording. Two voices were separated in a dedicated live test.

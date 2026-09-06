@@ -56,12 +56,18 @@ def transcribe(
     prompt: str | None = None,
     progress: Callable[[Segment], None] | None = None,
     condition_on_previous_text: bool = False,
+    task: str = "transcribe",
+    multilingual: bool = False,
 ) -> Result:
     """Decode `wav` (16 kHz mono PCM) with faster-whisper.
 
     `condition_on_previous_text` defaults to False for the same reason it
     does in `mlx_whisper.transcribe`: carrying text across decode windows
     invites repetition loops.
+
+    `multilingual=True` re-runs language detection on every segment instead of
+    once on the first thirty seconds. It is the reason this backend, and only
+    this one, can be pointed at a recording that changes language part-way.
 
     `model.transcribe()` returns a lazy generator: nothing decodes until it
     is iterated. That laziness is exactly where `progress` belongs -- each
@@ -79,6 +85,14 @@ def transcribe(
         initial_prompt=prompt,
         word_timestamps=True,
         condition_on_previous_text=condition_on_previous_text,
+        # "transcribe" or "translate", the latter being X->English only.
+        task=task,
+        # THE ONE BACKEND HERE THAT CAN DO THIS. faster-whisper's own docstring:
+        # "multilingual: Perform language detection on every segment." Everything
+        # else in this skill, mlx-whisper included, detects once from the first
+        # 30 seconds and applies that to the whole file -- so a call that changes
+        # language mid-way is decoded entirely as whichever language opened it.
+        multilingual=multilingual,
     )
 
     result = empty_result("faster-whisper", model)

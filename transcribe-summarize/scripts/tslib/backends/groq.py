@@ -40,6 +40,7 @@ PROVIDER = oai.Provider(
     default_model=DEFAULT_MODEL,
     error=GroqError,
     max_upload_bytes=MAX_UPLOAD_BYTES,
+    translate_endpoint="https://api.groq.com/openai/v1/audio/translations",
     cap_note="free-tier ",
 )
 
@@ -51,5 +52,8 @@ def transcribe(
     language: str | None = None,
     prompt: str | None = None,
     progress: Callable[[Segment], None] | None = None,
+    task: str = "transcribe",
 ) -> Result:
-    return oai.transcribe(PROVIDER, wav, model=model, language=language, prompt=prompt, progress=progress)
+    return oai.transcribe(
+        PROVIDER, wav, model=model, language=language, prompt=prompt, progress=progress, task=task
+    )

@@ -56,6 +56,13 @@ class Provider:
     # "unlimited" -- an oversized upload simply fails at the far end instead.
     max_upload_bytes: int | None = None
     cap_note: str = ""
+    # TRANSLATION IS A DIFFERENT URL, not a parameter. Both hosts expose
+    # `/audio/translations` alongside `/audio/transcriptions`, and both document
+    # it as English-out only:
+    #   OpenAI: "This endpoint supports translation into English only."
+    #   Groq:   "The translations endpoint only supports 'en' as a parameter option."
+    # Verified 2026-09-06. None means this provider has no translations route.
+    translate_endpoint: str | None = None
 
     @property
     def host(self) -> str:
@@ -68,6 +75,26 @@ class Provider:
     @property
     def path(self) -> str:
         parts = urllib.parse.urlparse(self.endpoint)
+        return parts.path or "/"
+
+    def path_for(self, task: str) -> str:
+        """The route for `task`. Raises rather than silently transcribing."""
+        if task == "transcribe":
+            return self.path
+        if task != "translate":
+            raise self.error(f"unknown task {task!r}")
+        if not self.translate_endpoint:
+            raise self.error(f"{self.label} has no translations endpoint")
+        parts = urllib.parse.urlparse(self.translate_endpoint)
+        if parts.scheme != "https":
+            raise ValueError(f"{self.name}: translate endpoint must be https, got {parts.scheme!r}")
+        if parts.netloc != self.host:
+            # Both routes must sit on the host already named in the egress
+            # disclosure. A translations URL on a different host would send audio
+            # somewhere the user was never shown.
+            raise ValueError(
+                f"{self.name}: translate endpoint host {parts.netloc!r} differs from {self.host!r}"
+            )
         return parts.path or "/"
 
 
@@ -136,6 +163,7 @@ def build_request(
     language: str | None,
     prompt: str | None,
     key: str,
+    task: str = "transcribe",
 ) -> PreparedRequest:
     """Build the outgoing request without sending it.
 
@@ -149,7 +177,12 @@ def build_request(
         ("timestamp_granularities[]", "segment"),
         ("timestamp_granularities[]", "word"),
     ]
-    if language:
+    if language and task == "transcribe":
+        # NOT sent on the translations route. There `language` means the OUTPUT
+        # language, and Groq documents that it "only supports 'en' as a parameter
+        # option" -- so forwarding the user's --lang de would be rejected, or
+        # worse, honoured as a request to translate into German, which neither
+        # host can do. The source language is inferred from the audio.
         fields.append(("language", language))
     if prompt:
         fields.append(("prompt", prompt))
@@ -157,7 +190,7 @@ def build_request(
     body, content_type = encode_multipart(fields, "file", wav.name, wav.read_bytes())
     return PreparedRequest(
         host=provider.host,
-        path=provider.path,
+        path=provider.path_for(task),
         body=body,
         headers={"Content-Type": content_type, "Authorization": f"Bearer {key}"},
     )
@@ -240,13 +273,19 @@ def transcribe(
     language: str | None = None,
     prompt: str | None = None,
     progress: Callable[[Segment], None] | None = None,
+    task: str = "transcribe",
 ) -> Result:
     """Send `wav` and return the shared Result shape."""
-    request = build_request(provider, wav, model=model, language=language, prompt=prompt, key=api_key(provider))
+    request = build_request(
+        provider, wav, model=model, language=language, prompt=prompt, key=api_key(provider), task=task
+    )
     payload = send(provider, request)
 
     result = empty_result(provider.name, model)
     result["text"] = payload.get("text", "").strip()
+    # On the translations route this is the language that was SPOKEN, not the
+    # language of the text below it, which is always English. transcribe.py
+    # records the task alongside it so the two are never read as one fact.
     result["language"] = payload.get("language")
 
     segments: list[Segment] = [_to_segment(raw, i) for i, raw in enumerate(payload.get("segments", []))]

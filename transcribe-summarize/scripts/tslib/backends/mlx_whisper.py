@@ -73,6 +73,7 @@ def transcribe(
     prompt: str | None = None,
     progress: Callable[[Segment], None] | None = None,
     condition_on_previous_text: bool = False,
+    task: str = "transcribe",
 ) -> Result:
     """Decode `wav` (16 kHz mono PCM) with mlx-whisper.
 
@@ -102,6 +103,12 @@ def transcribe(
         initial_prompt=prompt,
         condition_on_previous_text=condition_on_previous_text,
         word_timestamps=True,
+        # X->X or X->English. mlx_whisper.transcribe takes **decode_options and
+        # forwards them to DecodingOptions, whose own comment reads: "whether to
+        # perform X->X \"transcribe\" or X->English \"translate\"". There is no
+        # target other than English, which is why the CLI flag is a task and not
+        # a language.
+        task=task,
     )
 
     result = empty_result("mlx-whisper", model)

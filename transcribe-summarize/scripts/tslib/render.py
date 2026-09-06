@@ -109,8 +109,21 @@ def write_markdown_transcript(result: Result, dest: Path, meta: dict[str, Any]) 
         f"- Duration: {clock_hms(meta['original_duration'])}",
         f"- Engine: {result.get('backend', 'unknown')} / {result.get('model', 'unknown')}",
     ]
-    if result.get("language"):
+    if meta.get("task") == "translate":
+        # STATED AT THE TOP, AND FIRST AMONG THE LANGUAGE FACTS. A translated
+        # transcript reads exactly like a verbatim one -- fluent English, plausible
+        # throughout -- and a reader who does not know it is a translation will
+        # quote it as the speaker's own words. Whisper's translate task is X->English
+        # and nothing else, so the wording can be definite.
+        spoken = result.get("language")
+        facts.append(
+            "- **Translated to English.** These are not the words that were spoken"
+            + (f"; the audio is in {spoken}." if spoken else ".")
+        )
+    elif result.get("language"):
         facts.append(f"- Language: {result['language']}")
+    if meta.get("multilingual"):
+        facts.append("- Language re-detected on every segment, not once from the opening")
     if meta.get("guard_line"):
         facts.append(f"- Quality guard: {meta['guard_line']}")
     if meta.get("prepared_duration") and meta.get("trimmed"):

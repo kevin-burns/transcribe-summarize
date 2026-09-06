@@ -124,6 +124,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lang", default="en", help="ISO language code, or 'auto' to detect (default: en)")
     parser.add_argument("--prompt", default=None, help="names/jargon to bias the decoder toward")
     parser.add_argument(
+        "--task", default="transcribe", choices=("transcribe", "translate"),
+        # English is not a default this could sensibly change: Whisper's second
+        # task is X->English and there is no third. A backend that cannot do it
+        # refuses rather than quietly transcribing -- see backends.check_task.
+        help="transcribe in the spoken language, or translate to English (Whisper backends only)",
+    )
+    parser.add_argument(
+        "--multilingual", action="store_true",
+        help="re-detect the language on every segment, for a recording that changes language "
+             "part-way (faster-whisper only; gemini always does it)",
+    )
+    parser.add_argument(
         "--replace", action="append", default=[], metavar="WRONG=RIGHT",
         help="fix a known misrecognition after decoding. Repeatable.",
     )
@@ -225,6 +237,8 @@ def write_outputs(
         "trimmed": prepared.trimmed,
         "guard_line": report.summary_line(),
         "review": quality.review_candidates(result["segments"]),
+        "task": args.task,
+        "multilingual": args.multilingual or info.multilingual == "always",
     })
     render.write_srt(result["segments"], paths["srt"])
     render.write_json(result, paths["json"])
@@ -233,6 +247,8 @@ def write_outputs(
         "backend": info.name,
         "model": model,
         "kind": info.kind,
+        "task": args.task,
+        "multilingual": args.multilingual or info.multilingual == "always",
         "language": result.get("language"),
         "has_whisper_metrics": info.has_whisper_metrics,
         "decode_seconds": round(elapsed, 2),
@@ -264,6 +280,12 @@ def main() -> int:
         # Before the egress gate, not after: a file with no audio track would
         # otherwise be uploaded and billed, or fail locally with a raw ffmpeg error.
         audio.assert_has_audio(args.audio)
+        try:
+            backends.check_task(info, args.task, model)
+            multilingual_note = backends.check_multilingual(info, args.multilingual)
+        except backends.UnsupportedOption as exc:
+            die(str(exc))
+
         duration = audio.probe_duration(args.audio)
     except audio.AudioError as exc:
         die(str(exc))
@@ -284,6 +306,13 @@ def main() -> int:
         )
 
     note(f"engine : {info.name} / {model}")
+    if args.task == "translate":
+        note("task   : TRANSLATE -- the transcript will be English, not the words that were spoken")
+    if multilingual_note:
+        # Printed whether or not --multilingual was passed. The default case is
+        # the one that needs saying: a single detection on a mixed recording
+        # produces a clean-looking transcript of the wrong language.
+        note(f"lang   : {multilingual_note}")
     note(f"audio  : {args.audio}  ({render.clock_hms(duration)})")
 
     started = time.monotonic()
@@ -326,12 +355,22 @@ def main() -> int:
                 print(f"  [{stamp}] {segment.get('text', '').strip()}", file=sys.stderr)
 
         try:
+            # Only pass an option the backend's signature actually has. Sending
+            # task= to elevenlabs would be a TypeError, and check_task has already
+            # refused the cases where the user asked for something it cannot do.
+            extra: dict[str, object] = {}
+            if info.can_translate:
+                extra["task"] = args.task
+            if info.multilingual == "flag":
+                extra["multilingual"] = args.multilingual
+
             result: Result = module.transcribe(
                 prepared.wav,
                 model=model,
                 language=None if args.lang == "auto" else args.lang,
                 prompt=args.prompt,
                 progress=progress,
+                **extra,  # type: ignore[arg-type]
             )
         except Exception as exc:  # noqa: BLE001 -- backend libraries raise their own types
             die(f"{info.name} failed to decode: {exc}")

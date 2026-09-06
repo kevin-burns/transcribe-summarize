@@ -71,6 +71,31 @@ def test_leading_timecode_trips_decoder_artefact():
     assert any(f.rule == "decoder-artefact" for f in findings)
 
 
+def test_the_speaker_labels_the_backends_actually_emit_are_caught():
+    r"""The rule read \bSpeaker\s+\d+\b, which requires a space, and matched NONE
+    of the labels this tool produces. Both of these are MEASURED from a live
+    response, not read off a doc page: Scribe returns `speaker_0` (2026-09-04)
+    and Gemini returns `spk:0` (2026-09-06). The first attempt at this fix was
+    written from the Gemini reference, guessed `spk_1`, and still missed the real
+    `spk:0` -- so the colon case is pinned here specifically.
+    A control that cannot reach its own subject is not a control."""
+    for label in ("speaker_0", "spk:0", "spk:1", "SPEAKER_00", "Speaker 2", "spk 3", "speaker-1"):
+        findings = notes_check.check_text("inline", f"{label} said the migration is done.")
+        assert any(f.rule == "decoder-artefact" for f in findings), f"{label!r} was not flagged"
+
+
+def test_the_word_speaker_in_ordinary_prose_is_not_a_label():
+    """Widening the separator must not start flagging English. The digit is what
+    makes it a label, and the \b keeps it out of longer words."""
+    for clean in (
+        "The speaker was clear throughout.",
+        "The loudspeaker 2 metres away hummed.",
+        "There were 3 speakers on the call.",
+        "The speaker: 3 points were made, in order.",
+    ):
+        assert notes_check.check_text("inline", clean) == [], f"{clean!r} was flagged"
+
+
 def test_inline_ratio_does_not_trip_decoder_artefact():
     findings = notes_check.check_text("inline", "the budget was 3:1 in favour.")
     assert findings == []

@@ -18,7 +18,9 @@ be.
 from __future__ import annotations
 
 import ast
+import json
 import sys
+import wave
 from pathlib import Path
 
 import pytest
@@ -129,9 +131,10 @@ def test_which_backends_lack_whisper_metrics_is_pinned():
 
     parakeet   CTC/TDT, returns none of the three.
     elevenlabs Scribe returns a per-word logprob and no segment metrics.
+    gemini     3.5 Transcribe returns neither the three nor a word probability.
     """
     metric_free = {name for name, info in backends.REGISTRY.items() if not info.has_whisper_metrics}
-    assert metric_free == {"parakeet", "elevenlabs"}, (
+    assert metric_free == {"parakeet", "elevenlabs", "gemini"}, (
         f"metric-free backends changed to {metric_free}; if that is intended, confirm the guard "
         "still protects the new one and update references/backends.md"
     )
@@ -143,6 +146,7 @@ def test_network_backends_have_no_pip_spec():
     # nothing for MissingDependency to ever report for them.
     assert backends.REGISTRY["groq"].pip_spec is None
     assert backends.REGISTRY["openai"].pip_spec is None
+    assert backends.REGISTRY["gemini"].pip_spec is None
 
 
 # ---------------------------------------------------------------------------
@@ -470,3 +474,184 @@ def test_the_documented_with_specs_match_the_registry():
 
     for stale in ("nemo_toolkit", "mlx-whisper>=0.4.1"):
         assert stale not in table, f"SKILL.md still names {stale}"
+
+
+# ---------------------------------------------------------------------- gemini
+#
+# Gemini is the first backend here that makes TWO network calls, and the second
+# one goes to a URL the *server* chose. That is the interesting surface: every
+# other backend posts to an endpoint written in this repo, so there is nothing
+# to redirect. These tests are mostly about that, plus the response shape.
+
+from tslib.backends import gemini as gm  # noqa: E402
+
+
+def _write_silent_wav(path, *, seconds: float, rate: int = 16000) -> None:
+    """A real PCM WAV header, so `wave` can read a duration out of it."""
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(b"\x00\x00" * int(rate * seconds))
+
+
+def _gword(text, start, end, speaker="spk:0"):
+    return {
+        "type": "word_info", "text": text, "speaker": speaker,
+        "start_offset": f"{start}s", "end_offset": f"{end}s",
+    }
+
+
+def _genvelope(words, output_text="Hello world"):
+    return {
+        "id": "interactions/abc123", "status": "completed", "output_text": output_text,
+        "steps": [{"content": [{"type": "text", "text": output_text, "annotations": words}]}],
+    }
+
+
+def test_gemini_is_network_and_unreachable_from_auto():
+    assert backends.REGISTRY["gemini"].kind == "network"
+    for system, machine in (("darwin", "arm64"), ("darwin", "x86_64"), ("linux", "x86_64"), ("win32", "AMD64")):
+        assert backends.resolve("auto", system=system, machine=machine).name != "gemini"
+
+
+def test_gemini_cost_is_input_plus_output_not_input_alone():
+    """Google prices audio in and text out separately and both land on the
+    invoice. Quoting only the $0.18 input half would understate every estimate by
+    41%, so the derived figure is pinned here with its arithmetic.
+
+    25 tok/s * 3600 = 90_000 tok/hr at $2.00/M  = $0.180
+    175 tok/min * 60 = 10_500 tok/hr at $12.00/M = $0.126
+    """
+    assert backends.estimate_cost("gemini", "gemini-3.5-transcribe", 3600) == pytest.approx(0.306)
+    assert backends.estimate_cost("gemini", "gemini-3.5-transcribe", 1800) == pytest.approx(0.153)
+    derived = 90_000 * 2.00 / 1_000_000 + 10_500 * 12.00 / 1_000_000
+    assert derived == pytest.approx(0.306)
+
+
+def test_gemini_refuses_an_upload_url_that_is_not_google():
+    """The resumable upload URL arrives in a response header, so it is the one
+    value in the exchange this repo did not write. A redirect to another host
+    would move the user's audio somewhere they never named."""
+    with pytest.raises(gm.GeminiError, match="not a googleapis.com host"):
+        gm.parse_upload_url("https://evil.example.com/upload/v1beta/files?id=1")
+    with pytest.raises(gm.GeminiError, match="not a googleapis.com host"):
+        # The check is on the hostname, not a substring: a host that merely ends
+        # with the string inside a longer label must not pass.
+        gm.parse_upload_url("https://generativelanguage.googleapis.com.evil.example/x")
+    with pytest.raises(gm.GeminiError, match="not https"):
+        gm.parse_upload_url("http://generativelanguage.googleapis.com/upload/v1beta/files")
+
+
+def test_gemini_accepts_a_real_upload_url_with_its_query_string():
+    netloc, path = gm.parse_upload_url(
+        "https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=AB&upload_protocol=resumable"
+    )
+    assert netloc == "generativelanguage.googleapis.com"
+    assert path == "/upload/v1beta/files?upload_id=AB&upload_protocol=resumable"
+    # A regional or per-upload subdomain is still Google.
+    assert gm.parse_upload_url("https://eu.googleapis.com/x")[0] == "eu.googleapis.com"
+
+
+def test_gemini_key_goes_to_the_api_key_header_and_nowhere_else(tmp_path):
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF....WAVE")
+    decoy = "gemini-decoy-key-not-a-real-credential"
+    _host, _path, body, headers = gm.build_upload_start(wav, key=decoy)
+    assert headers["x-goog-api-key"] == decoy
+    assert decoy not in body.decode()
+    assert [k for k, v in headers.items() if v == decoy] == ["x-goog-api-key"]
+
+
+def test_gemini_body_pins_verbatim_and_never_asks_for_smart():
+    """smart mode is incompatible with timestamps and diarization, so a request
+    carrying it would come back with no clock to map onto the original file.
+    There is no flag for it and there must be no path to it."""
+    body = gm.build_body("files/abc", mime="audio/wav", model="gemini-3.5-transcribe",
+                         language=None, vocabulary=None)
+    mode = body["generation_config"]["transcription_config"]["mode"]
+    assert mode["type"] == "verbatim"
+    assert mode["timestamp_granularities"] == ["word"]
+    assert mode["diarization_mode"] == "speaker"
+    assert "smart" not in json.dumps(body)
+
+
+def test_gemini_empty_language_list_means_autodetect_not_omitted():
+    """[] is documented as 'detect the language and handle code-switching'.
+    Dropping the key entirely is a different request."""
+    config = gm.build_body("files/a", mime="audio/wav", model="m", language=None,
+                           vocabulary=None)["generation_config"]["transcription_config"]
+    assert config["language_codes"] == []
+    config_de = gm.build_body("files/a", mime="audio/wav", model="m", language="de",
+                              vocabulary=None)["generation_config"]["transcription_config"]
+    assert config_de["language_codes"] == ["de"]
+
+
+def test_gemini_parses_protobuf_duration_offsets():
+    assert gm.parse_offset("0.100s") == pytest.approx(0.1)
+    assert gm.parse_offset("12s") == pytest.approx(12.0)
+    assert gm.parse_offset("3.000000001s") == pytest.approx(3.0)
+    assert gm.parse_offset(None) == 0.0
+    assert gm.parse_offset(1.5) == pytest.approx(1.5)
+    with pytest.raises(gm.GeminiError):
+        gm.parse_offset("half past two")
+
+
+def test_gemini_collects_only_word_info_annotations():
+    payload = _genvelope([
+        _gword("Hello", 0.1, 0.45),
+        {"type": "safety_rating", "text": "ignore me"},
+        _gword("world", 0.5, 0.9),
+    ])
+    assert [w["text"] for w in gm.collect_words(payload)] == ["Hello", "world"]
+
+
+def test_gemini_splits_segments_on_speaker_change_and_on_a_long_pause():
+    words = [
+        _gword("Morning", 0.0, 0.4, "spk:0"),
+        _gword("everyone.", 0.4, 0.9, "spk:0"),
+        _gword("Morning.", 1.0, 1.4, "spk:1"),      # speaker change
+        _gword("So,", 9.0, 9.3, "spk:1"),           # 7.6 s pause
+    ]
+    segments = gm.segments_from_words(words)
+    assert [s["speaker"] for s in segments] == ["spk:0", "spk:1", "spk:1"]
+    assert segments[0]["text"] == "Morning everyone."
+    assert segments[0]["start"] == pytest.approx(0.0)
+    assert segments[0]["end"] == pytest.approx(0.9)
+    assert "  " not in " ".join(s["text"] for s in segments)
+
+
+def test_gemini_segments_carry_no_metrics_so_the_guard_stays_silent():
+    """None means 'this backend cannot tell you', never 'this segment is fine'.
+    A metric arriving here as 0.0 would read as a passing score."""
+    segment = gm.segments_from_words([_gword("Hello", 0.0, 0.4)])[0]
+    for key in ("avg_logprob", "compression_ratio", "no_speech_prob", "confidence"):
+        assert segment[key] is None, f"{key} should be None, got {segment[key]!r}"
+
+
+def test_gemini_refuses_a_file_over_the_thirty_minute_cap(tmp_path):
+    """Word timestamps cap a request at 30 minutes. Refusing before the upload
+    is the point: a file rejected after 40 MB has gone over the wire has already
+    left the machine."""
+    long_wav = tmp_path / "long.wav"
+    _write_silent_wav(long_wav, seconds=31 * 60)
+    with pytest.raises(gm.GeminiError, match="30-minute limit"):
+        gm.check_limits(long_wav)
+
+    short_wav = tmp_path / "short.wav"
+    _write_silent_wav(short_wav, seconds=2)
+    gm.check_limits(short_wav)  # must not raise
+
+
+def test_gemini_refuses_a_format_the_api_does_not_take(tmp_path):
+    bad = tmp_path / "clip.mov"
+    bad.write_bytes(b"\x00")
+    with pytest.raises(gm.GeminiError, match=r"Gemini accepts .*not '\.mov'"):
+        gm.build_upload_start(bad, key="decoy")
+
+
+def test_gemini_missing_key_names_the_variable_not_a_value(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(gm.GeminiError) as excinfo:
+        gm._api_key()
+    assert "GEMINI_API_KEY" in str(excinfo.value)

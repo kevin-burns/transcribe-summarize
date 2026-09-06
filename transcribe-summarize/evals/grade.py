@@ -140,8 +140,8 @@ def check_registry() -> list[tuple[str, bool]]:
     # nothing failing. This assertion caught exactly that when elevenlabs landed.
     metric_free = {name for name, info in backends.REGISTRY.items() if not info.has_whisper_metrics}
     results.append((
-        f"metric-free backends are exactly {{parakeet, elevenlabs}} (got {sorted(metric_free)})",
-        metric_free == {"parakeet", "elevenlabs"},
+        f"metric-free backends are exactly {{parakeet, elevenlabs, gemini}} (got {sorted(metric_free)})",
+        metric_free == {"parakeet", "elevenlabs", "gemini"},
     ))
     for name in ("mlx-whisper", "faster-whisper", "groq", "openai"):
         results.append((

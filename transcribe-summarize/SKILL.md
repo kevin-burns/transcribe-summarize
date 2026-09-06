@@ -34,7 +34,7 @@ one selected, so pick it with `uv run --with`:
 | `mlx-whisper` — default on Apple Silicon | macOS arm64 only | `'mlx-whisper>=0.4.2'` |
 | `faster-whisper` — default elsewhere | mac / Windows / Linux | `'faster-whisper>=1.2'` |
 | `parakeet` — opt-in | Apple Silicon verified | `'parakeet-mlx'` |
-| `groq`, `openai`, `elevenlabs` — opt-in, **network** | any | nothing to install |
+| `groq`, `openai`, `elevenlabs`, `gemini` — opt-in, **network** | any | nothing to install |
 
 If the library is missing, the error prints the exact command. Don't guess it.
 
@@ -91,8 +91,44 @@ Before anything is sent, the tool prints provider, endpoint, file size, duration
 and estimated cost, then waits. Use `--dry-run` to show the user that block
 before committing. In a non-interactive session an unconfirmed upload is refused.
 
-Keys come from `GROQ_API_KEY` / `OPENAI_API_KEY`. Never accept one as a flag,
-never echo one, never write one into a file.
+Keys come from the environment, one variable per backend, and nowhere else.
+Never accept one as a flag, never echo one, never write one into a file.
+
+| backend | key | model | $/hour | diarizes |
+|---|---|---|---|---|
+| `groq` | `GROQ_API_KEY` | `whisper-large-v3-turbo` | 0.04 | no |
+| `groq` | `GROQ_API_KEY` | `whisper-large-v3` (default) | 0.111 | no |
+| `elevenlabs` | `ELEVENLABS_API_KEY` | `scribe_v2` | 0.22 | up to 32 |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.5-transcribe` | 0.306 | up to 3 |
+| `openai` | `OPENAI_API_KEY` | `whisper-1` | 0.36 | no |
+
+### `--backend gemini` — the two things to say before running it
+
+```bash
+ts '' /path/to/audio.m4a --backend gemini --dry-run     # show the block, send nothing
+ts '' /path/to/audio.m4a --backend gemini               # then run it
+```
+
+Nothing to install — it is stdlib `http.client`, so the `--with` argument is
+empty. Two facts belong in the sentence you say to the user before running it,
+because neither is visible from the command line:
+
+- **The audio is uploaded twice over.** Gemini has no single-shot endpoint: the
+  file goes to Google's Files API first, and the transcription request then
+  carries only the URI that came back. **Google keeps that upload for 48 hours.**
+  The disclosure block prints this; do not skip past it.
+- **30 minutes is the ceiling**, not the hour Google's own page leads with. The
+  hour applies only without word timestamps or diarization, and this backend
+  always requests both — without word offsets there is no clock to map back onto
+  the user's file. A longer recording is refused *before* the upload starts.
+
+**Do not offer Gemini's `smart` mode. It is not wired up, on purpose.** If the
+user asks for it — it is the model's headline feature, and it does remove filler
+words and rewrite spoken self-corrections — the answer is that Google's API
+refuses word timestamps and speaker labels alongside it, so it would produce no
+`.srt` and no speakers, and it changes the words. Filler removal happens at the
+**notes** step instead, where it is labelled a summary and checked. See
+`references/backends.md`.
 
 ## The quality guard
 
@@ -102,8 +138,9 @@ inline flagged, `--guard off` disables it.
 
 **It does not transfer to every backend.** The strong rules read Whisper decoder
 metrics. `faster-whisper`, Groq and OpenAI return all three, so the guard is the
-same code. **Parakeet returns none of them** and falls back to a repetition rule
-only — the tool says so at run time. See `references/backends.md`.
+same code. **Parakeet, ElevenLabs and Gemini return none of them** and fall back
+to the backend-independent rules only — the tool says so at run time. See
+`references/backends.md`.
 
 If the user asks why a stretch of transcript is missing, read the `.json`: the
 answer is there with the numbers that caused it.
@@ -200,13 +237,14 @@ this pipeline outside a Claude Code session; inside one it is a pointless upload
 ### Ask first — three things the audio cannot tell you
 
 **Almost no backend here identifies speakers.** Every Whisper engine and Parakeet
-return no speaker field at all. The one exception is `--backend elevenlabs`
-(Scribe), which diarizes up to 32 speakers — but it returns `speaker_0`,
-`speaker_1`, positional labels rather than names, and the register forbids a raw
-label in a notes document. So it tells you *how many* people spoke and *which
-lines belong together*; it still cannot tell you *who*. Attribution comes from the
-user either way — Scribe just makes the mapping possible from the transcript
-instead of from memory.
+return no speaker field at all. Two exceptions: `--backend elevenlabs` (Scribe)
+diarizes up to 32 speakers, and `--backend gemini` up to 3. Both return
+positional labels rather than names — `speaker_0` and `spk:0` respectively, the
+formats measured from live responses on 2026-09-04 and 2026-09-06 — and the
+register forbids a raw label in a notes document, in either format. So they tell
+you *how many* people spoke and *which lines belong together*; they still cannot
+tell you *who*. Attribution comes from the user either way; diarization just makes
+the mapping possible from the transcript instead of from memory.
 
 Before writing notes, ask for:
 

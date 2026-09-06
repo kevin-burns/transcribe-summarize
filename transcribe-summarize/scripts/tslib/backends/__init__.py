@@ -54,6 +54,10 @@ class BackendInfo:
     platforms: tuple[str, ...]  # "<sys.platform>-<platform.machine()>" pairs, or ("any",)
     default_model: str
     notes: str
+    # One extra line printed inside the egress disclosure, for a provider
+    # whose terms the user is agreeing to and cannot see from here (Gemini
+    # stores the upload for 48 hours). None for everything else.
+    egress_note: str | None = None
 
 
 REGISTRY: dict[str, BackendInfo] = {
@@ -124,6 +128,31 @@ REGISTRY: dict[str, BackendInfo] = {
             "docs, so no cost estimate is offered for it."
         ),
     ),
+    "gemini": BackendInfo(
+        name="gemini",
+        kind="network",
+        pip_spec=None,  # stdlib http.client only -- no google-genai SDK dependency
+        import_name=None,
+        # Gemini 3.5 Transcribe returns neither Whisper's three segment metrics
+        # nor a per-word probability, so the guard's metric rules cannot fire.
+        # Its backend-independent rules (decoded_from_silence, repeated_token)
+        # still apply.
+        has_whisper_metrics=False,
+        platforms=("any",),
+        default_model="gemini-3.5-transcribe",
+        notes=(
+            "Opt-in only. The one backend here that uploads in TWO steps: the audio goes to "
+            "the Files API first and the transcription request carries only the returned URI. "
+            "Diarizes up to 3 speakers (more is experimental) and returns word timestamps. "
+            "Its `smart` mode -- filler removal, self-correction resolution, auto-formatting -- "
+            "is deliberately NOT offered: the API refuses timestamps and diarization alongside "
+            "it, so there would be no clock to map back. Reads GEMINI_API_KEY from the "
+            "environment; never accepts a key as a flag."
+        ),
+        egress_note=(
+            "Google's Files API keeps the upload for 48 hours before deleting it."
+        ),
+    ),
     "openai": BackendInfo(
         name="openai",
         kind="network",
@@ -151,6 +180,16 @@ COST_PER_HOUR_USD: dict[str, dict[str, float]] = {
     # Verified 2026-09-04 from elevenlabs.io/pricing/api. Flat across every
     # plan tier -- only the included hours differ, not the rate.
     "elevenlabs": {"scribe_v2": 0.22, "scribe_v2_realtime": 0.39},
+    # Gemini publishes a token rate, not an hourly one, so this is derived and
+    # the derivation is written down rather than left as a magic number.
+    # Verified 2026-09-06 from ai.google.dev/gemini-api/docs/pricing:
+    #   25 audio tokens/second in, 175 text tokens/minute out;
+    #   $2.00 per M input tokens, $12.00 per M output tokens.
+    #   in  = 25 * 3600 = 90,000 tok/hr * $2/M  = $0.180
+    #   out = 175 * 60  = 10,500 tok/hr * $12/M = $0.126
+    # Both halves are counted because both appear on the invoice. There is
+    # also a free tier, which this deliberately does not assume you are on.
+    "gemini": {"gemini-3.5-transcribe": 0.306},
 }
 
 

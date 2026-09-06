@@ -13,11 +13,12 @@ declared clean.
 | `groq` | any | none — stdlib `urllib` | **full** | **yes** |
 | `openai` | any | none — stdlib `urllib` | **full** | **yes** |
 | `elevenlabs` (Scribe) | any | none — stdlib `http.client` | **partial** | **yes** |
+| `gemini` (3.5 Transcribe) | any | none — stdlib `http.client` | **partial** | **yes** |
 
 `--backend auto` resolves to `mlx-whisper` on Apple Silicon and `faster-whisper`
 everywhere else. **It never resolves to a network backend** — not as a default,
 not as a fallback after a local backend fails. There is no code path from `auto`
-to `groq` or `openai`; `resolve("auto")` can only return one of two local
+to any of them; `resolve("auto")` can only return one of two local
 entries. A test asserts it across twelve platform combinations.
 
 ## Default models
@@ -208,7 +209,12 @@ they were byte-identical. Scribe was right. If a diarization test ever reports
 one speaker, check the fixture actually contains two before blaming the vendor.
 
 That does **not** make attribution automatic. Scribe returns `speaker_0`,
-`speaker_1` — positional labels, not names. A person still maps labels to people,
+`speaker_1` — positional labels, not names. **Re-measured 2026-09-06 and now
+pinned by a live assertion** (`re.fullmatch(r"speaker_\d+")`), because the format
+had only ever been a sentence in this file: the live test asserted that *two*
+labels came back, never what they looked like. Gemini's turn out to use a colon
+(`spk:0`), so the two are not interchangeable and `notes_check.py` has to match
+both. A person still maps labels to people,
 exactly as before, and `notes_check.py` still rejects a raw label in a notes
 document. What changes is that the mapping is now *possible from the transcript*
 rather than needing to be reconstructed from memory.
@@ -229,6 +235,100 @@ one of the four that diarizes.
 Diarization is on by default in the backend and is not currently exposed as a CLI
 flag; if you need it off, that is a small addition to `transcribe.py`.
 
+## Gemini 3.5 Transcribe: two round trips, and a mode deliberately left out
+
+Verified against ai.google.dev/gemini-api/docs/transcribe, .../docs/files and
+.../docs/pricing on 2026-09-06: `POST https://generativelanguage.googleapis.com/v1beta/interactions`,
+auth header `x-goog-api-key` (**not** bearer), `model=gemini-3.5-transcribe`.
+
+**It uploads in two steps, which nothing else here does.** The audio never goes
+to the transcription endpoint. It goes to the Files API first — a resumable
+upload whose second leg posts to a URL *the server chooses* and returns in an
+`X-Goog-Upload-URL` header — and the transcription request then carries only the
+`files/...` URI that came back. That server-chosen URL is the one value in the
+whole exchange this repository did not write, so it is checked before any audio
+follows it: https, and a `googleapis.com` host, or the backend refuses. A test
+covers the redirect case and the `generativelanguage.googleapis.com.evil.example`
+suffix trick.
+
+**Google keeps the upload for 48 hours.** That is stated in the egress
+disclosure block, because it is part of what the user is agreeing to and is not
+visible from the command line otherwise.
+
+**It returns words, not segments** — `steps[].content[].annotations[]` entries of
+`type: word_info`, carrying `text`, `speaker`, `start_offset` and `end_offset`.
+The offsets are protobuf durations (`"0.100s"`), so they are parsed rather than
+read as floats. Segmentation is ours, grouping on speaker change and a 1 s
+pause — the same rule as the Scribe path, but a separate implementation, because
+Scribe's spacing entries, logprobs and punctuation tokens have no equivalent here
+and merging them means a branch per provider at every step.
+
+**It diarizes up to 3 speakers** (more is described as experimental), against
+Scribe's 32. Same caveat as Scribe: `spk:0` is a positional label, not a name.
+
+### Why `smart` mode is not offered
+
+It is the model's headline feature — it removes filler words, resolves spoken
+self-corrections ("let's meet Tuesday — no, Wednesday"), and reflows the text
+into paragraphs, bullet lists and formatted numbers. It is not exposed here, and
+the reason is in Google's own reference:
+
+> Smart transcription (`"smart"`) is incompatible with `timestamp_granularities`
+> and `diarization_mode`.
+
+So it returns no word timing and no speaker labels. Three consequences, each
+disqualifying on its own:
+
+- **No clock.** Every timestamp this tool writes is mapped back from the trimmed
+  audio onto the user's original file. With no word offsets there is nothing to
+  map, and the `.srt` cannot be built at all.
+- **No speakers**, losing the one thing this backend has over the Whisper family.
+- **It is not a transcript.** It is a model's tidied version of one. This skill
+  exists because what a decoder silently adds or drops is the thing you cannot
+  see from reading the output — and a mode whose job is to change the words is
+  the largest possible instance of that.
+
+Tidying the prose is what the notes document is for, one step downstream, where
+it is labelled a summary and checked by `notes_check.py`. `mode` is pinned to
+verbatim in `build_body()` and a test asserts the string `smart` appears nowhere
+in a built request.
+
+**Quality metrics: partial.** Gemini returns none of Whisper's three and no
+per-word probability either, so `has_whisper_metrics=False` and the metric rules
+stay silent. `confidence` is `None`, not a substituted zero. The
+backend-independent rules (`decoded_from_silence`, `repeated_token`) apply, as
+they do to Parakeet and Scribe.
+
+**Limits.** The Files API caps a file at 2 GB and a project at 20 GB. A unary
+request takes an hour of audio — but **30 minutes** once word timestamps or
+diarization are enabled, and this backend always asks for both, so 30 minutes is
+the cap it actually operates under and the one it enforces. The check runs on the
+prepared file before the upload starts, reading the duration from the WAV header
+with stdlib `wave` rather than shelling out to ffprobe.
+
+**Verified live on 2026-09-06**, not merely documented. `tests/test_gemini_live.py`
+is double-gated (`TS_LIVE_API=1` *and* `GEMINI_API_KEY`) and all five checks pass:
+the two-step upload returns a `files/...` URI, word timestamps arrive as
+`word_info` annotations with protobuf duration strings, two synthesised voices
+came back as two distinct speakers, Whisper's three metrics really are absent,
+and a wrong key fails without the key appearing in the error.
+
+**And the live run corrected the docs, which is the whole reason for running it.**
+The speaker labels are `spk:0` and `spk:1` — a **colon**, not the underscore this
+file and `notes_check.py` had both been written to expect. The decoder-artefact
+rule in `notes_check.py` had just been widened from `\bSpeaker\s+\d+\b` to catch
+Scribe's `speaker_0`, using `[\s_-]*` — and that widened rule still let `spk:0`
+straight through, because it was written from the API reference rather than a
+real reply. Both are now pinned to measured strings in
+`tests/test_notes_check.py`. Same lesson Scribe taught about spacing entries: the
+response shape is not knowable from the docs.
+
+**One accuracy note from the same run**, on 7.4 s of synthesised speech:
+"Terragrunt" came back as "peregrine". That is a single data point on synthetic
+audio and is not comparable to the measured table in `README.md`, but it is the
+same failure mode every other backend showed on that word — no backend here has
+got it right yet.
+
 ## Network backends: cost and limits
 
 Per hour of audio, from the providers' own documentation:
@@ -238,7 +338,14 @@ Per hour of audio, from the providers' own documentation:
 | groq | `whisper-large-v3` | 0.111 |
 | groq | `whisper-large-v3-turbo` | 0.04 |
 | elevenlabs | `scribe_v2` | 0.22 |
+| gemini | `gemini-3.5-transcribe` | 0.306 (derived) |
 | openai | `whisper-1` | 0.36 |
+
+Gemini publishes a token rate rather than an hourly one, so 0.306 is derived:
+25 audio tokens/second in at $2.00/M is $0.180/hour, and 175 text tokens/minute
+out at $12.00/M is $0.126/hour. Both halves appear on the invoice, so both are
+counted — quoting the input half alone would understate every estimate by 41%.
+There is also a free tier, which the estimate deliberately does not assume.
 
 Groq caps uploads at **25 MB** (free tier) and 100 MB (dev tier). The tool
 refuses an oversized file with the shrink command rather than chunking silently:
@@ -260,30 +367,47 @@ nothing. In a non-interactive session an unconfirmed upload is refused, not
 assumed — a skill running unattended must not upload because nobody was there to
 say no.
 
-API keys are read from `GROQ_API_KEY` / `OPENAI_API_KEY` only. Never a flag,
-never printed, never written to the run manifest.
+API keys are read from the environment, one variable per backend, and nowhere
+else. Never a flag, never printed, never written to the run manifest.
 
-## No backend removes filler — not even the hosted ones
+| backend | environment variable |
+|---|---|
+| `groq` | `GROQ_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
 
-A common assumption is that the cloud models clean up speech and the local ones do not. Measured
-2026-09-04 on audio containing three "um", three "uh", one "er", plus "I mean" and "you know":
+This list is checked against the registry rather than maintained by hand — the
+`--backend` help text in `transcribe.py` derives its network list the same way,
+after it spent a day saying "groq/openai" while ElevenLabs was already shipping.
 
-| backend | filler kept | hedges kept |
-|---|---|---|
-| mlx-whisper turbo (local) | 5 | 2 |
-| faster-whisper (local) | 5 | 2 |
-| parakeet (local) | 5 | 2 |
-| **openai whisper-1 (hosted)** | **5** | **2** |
+## Transcription does not remove filler — with one exception, which is not wired up
 
-Identical output, to the token. Whisper is trained to transcribe verbatim, and Parakeet behaves
-the same way. **Paying for a hosted model does not buy you disfluency removal.**
+A common assumption is that the cloud models clean up speech and the local ones do not. They do
+not: Whisper is trained to transcribe verbatim, and Parakeet behaves the same way. **Paying for a
+hosted Whisper does not buy you disfluency removal.**
 
-That is not a defect. A transcript that silently drops words is worse than one that keeps them —
+The one real exception is **Gemini's `smart` mode**, which is documented to strip filler words and
+resolve spoken self-corrections. It is deliberately not offered here — see the Gemini section
+above for why — so nothing in this tool removes filler at the transcription step.
+
+That is not a defect. A transcript that silently drops words is worse than one that keeps them:
 you cannot tell what was removed. Cleanup belongs in a later pass that knows it is editing.
 
 In this skill that pass is the notes step, and it is where filler comes out. Products that appear
 to transcribe cleanly are doing the same thing: ASR first, then a second model that rewrites.
 **If you skip the notes step you have a verbatim transcript, and nothing has cleaned it.**
+
+> **A table of filler counts used to sit here and was removed on 2026-09-06.** It claimed the test
+> audio contained three "um", three "uh" and one "er" plus "I mean" and "you know", and that four
+> backends each kept 5 and 2 — "identical output, to the token". Every eval run in this project
+> used one recording, named in every `run.json`, and it contains **none** of those tokens: zero
+> hits for `um`, `uh`, `er`, "I mean", "you know", "like" and "sort of", across the transcripts and
+> across the `.json` sidecars that retain suppressed segments, in every backend. Four backends
+> returning no filler from audio with no filler demonstrates nothing, so the table was evidence for
+> a claim it could not support. The claim above is kept because it is true on other grounds; the
+> numbers are gone because they had no source. Re-measuring on audio that actually contains filler
+> is `claude-skills-luwe`.
 
 ## Preparation is shared, and it matters more than the backend
 

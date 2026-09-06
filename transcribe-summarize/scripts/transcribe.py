@@ -71,6 +71,10 @@ def disclose_egress(
         f"  model    : {model}",
         f"  cost     : {f'up to ~${cost:.3f}' if cost is not None else 'unknown for this model'}",
     ]
+    if info.egress_note:
+        # A provider-specific term the user is agreeing to and cannot see from
+        # here -- Gemini's Files API holds the upload for 48 hours.
+        lines.append(f"  note     : {info.egress_note}")
     if prepared_first:
         # The figures above are the WHOLE file, because this block has to print
         # before any work happens. Silence trimming runs first and only the kept
@@ -107,7 +111,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("audio", type=Path, help="audio file (mp3, m4a, wav, ...)")
     parser.add_argument(
         "--backend", default="auto",
-        help="auto (local, platform-appropriate), or name one. groq/openai send audio over the network.",
+        # Derived, not typed out: the hand-written list said "groq/openai" for a
+        # day after elevenlabs landed, which understated what could leave the
+        # machine. That is the one sentence here that must never go stale.
+        help=(
+            "auto (local, platform-appropriate), or name one. These send audio over the network: "
+            + ", ".join(sorted(n for n, i in backends.REGISTRY.items() if i.kind == "network"))
+            + "."
+        ),
     )
     parser.add_argument("--model", default=None, help="engine-specific model name (default: the backend's)")
     parser.add_argument("--lang", default="en", help="ISO language code, or 'auto' to detect (default: en)")

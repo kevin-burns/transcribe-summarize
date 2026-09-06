@@ -26,6 +26,7 @@ $0.0008 at the published $0.22/hour.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -99,6 +100,18 @@ def test_scribe_transcribes_and_separates_the_two_speakers(two_speaker_wav):
 
     # THE CAPABILITY THAT JUSTIFIES THIS BACKEND EXISTING.
     speakers = {s.get("speaker") for s in result["segments"] if s.get("speaker")}
+    # Pin the LITERAL format, not just the count. `notes_check.py` has a rule
+    # whose whole job is to catch a raw label leaking into a notes document, and
+    # a rule written against a remembered format is a rule that does not fire:
+    # it was widened to catch `speaker_0` and still missed Gemini's `spk:0`,
+    # because nothing had ever asserted either string. Now something does.
+    print(f"\nScribe speaker labels: {sorted(speakers)}")
+    for label in speakers:
+        assert re.fullmatch(r"speaker_\d+", label), (
+            f"Scribe's label format changed to {label!r}; notes_check.py's "
+            "decoder-artefact rule must be re-checked against it"
+        )
+
     assert len(speakers) >= 2, (
         f"diarization returned {len(speakers)} speaker(s) for two distinct voices: {speakers}. "
         "If this stops holding, elevenlabs is just a more expensive transcriber."

@@ -138,7 +138,18 @@ _MACHINE_ORIGIN: list[tuple[re.Pattern[str], str]] = [
 _DECODER_LINE_START = re.compile(r"^\s*\d{1,2}:\d{2}(?::\d{2})?\b")
 
 _DECODER_INLINE: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bSpeaker\s+\d+\b", re.I), "do not use decoder speaker labels; name the person or role"),
+    # This rule was \bSpeaker\s+\d+\b, which requires a space and matched NONE of
+    # the labels this tool actually emits. Both formats here are MEASURED from a
+    # live response, not read off a doc page: ElevenLabs Scribe returns
+    # `speaker_0` (2026-09-04) and Gemini returns `spk:0` (2026-09-06). The
+    # colon is why the alternation is (?:[\s_-]*|:) rather than one character
+    # class -- a first attempt at this fix used [\s_-]* and still missed `spk:0`,
+    # because it was written against the API reference instead of a real reply.
+    # Requiring the digit to sit tight against the colon keeps ordinary prose
+    # like "speaker: 3 points were made" out of it, and the leading \b keeps
+    # "loudspeaker 2" out.
+    (re.compile(r"\b(?:speaker|spk)(?:[\s_-]*|:)\d+\b", re.I),
+     "do not use decoder speaker labels; name the person or role"),
     (re.compile(r"\[\d+\]"), "do not use bare segment markers"),
 ]
 

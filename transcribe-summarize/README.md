@@ -57,13 +57,18 @@ Worth being explicit, because several of these are things people assume:
   confidently wrong in ways no threshold catches — measured here, `large-v3`
   silently dropped a speaker correcting a figure, and *every* backend heard
   "board pack" as "board packs up". A human has to read it.
-- **It does not remove filler by transcribing.** No model does — local or hosted.
-  Measured: mlx-whisper, faster-whisper, Parakeet and OpenAI all returned the
-  same "um"s. Filler comes out at the **notes** step, so a raw transcript is
-  verbatim and uncleaned.
-- **It does not identify who is speaking**, except on `--backend elevenlabs`,
-  and even there you get `speaker_0` / `speaker_1`, not names. Attendees are
-  something you tell it.
+- **It does not remove filler by transcribing.** Whisper is trained to
+  transcribe verbatim and Parakeet behaves the same way, so a hosted Whisper
+  buys you nothing here that a local one does not. Gemini is the one backend here that
+  advertises otherwise — its `smart` mode is documented to strip filler and
+  rewrite spoken self-corrections — and **this tool deliberately does not offer
+  that mode**, because Google's API refuses word timestamps and speaker labels
+  alongside it, which would leave no clock to map back onto your file and no
+  `.srt` at all. Filler comes out at the **notes** step instead, so a raw
+  transcript stays verbatim and uncleaned.
+- **It does not identify who is speaking**, except on `--backend elevenlabs` (up
+  to 32 speakers) or `--backend gemini` (up to 3), and even there you get
+  `speaker_0` or `spk:0`, not names. Attendees are something you tell it.
 - **It does not translate**, do real-time streaming, or handle multi-track audio.
 - **It does not edit your words.** The transcript is verbatim; judgement happens
   in the notes, under a fixed register.
@@ -160,6 +165,11 @@ uv run --with 'mlx-whisper>=0.4.2' --script scripts/transcribe.py meeting.m4a
 # Windows / Linux
 uv run --with 'faster-whisper>=1.2' --script scripts/transcribe.py meeting.m4a \
     --backend faster-whisper
+
+# A network backend, when you want one. Nothing to install -- these are stdlib
+# http.client -- but you must name the backend, and you will be asked first.
+uv run --script scripts/transcribe.py meeting.m4a --backend gemini --dry-run
+uv run --script scripts/transcribe.py meeting.m4a --backend gemini
 ```
 
 You get:
@@ -197,6 +207,7 @@ Useful flags:
 | `groq` | any | full | **yes** |
 | `openai` | any | full | **yes** |
 | `elevenlabs` (Scribe) | any | partial | **yes** |
+| `gemini` (3.5 Transcribe) | any | partial | **yes** |
 
 `--backend auto` picks `mlx-whisper` on Apple Silicon and `faster-whisper`
 elsewhere. **It can never pick a network backend** — not as a default, not as a
@@ -225,6 +236,29 @@ were already cached, so no download time is included. Silence-trimming removed
 | `faster-whisper` | large-v3 | 53.9 s | 9 / 12 | "Terragrunt", "the AKS ones" |
 | `parakeet` | parakeet-tdt-0.6b-v3 | 12.5 s | 8 / 12 | "Raghunathan", "Terragrunt" |
 | `mlx-whisper` | large-v3 (was default) | 21.5 s | 8 / 12 | **dropped a spoken self-correction** |
+
+**What that table is and is not, re-checked 2026-09-06.** Every eval run this
+project has ever made used one source file, named in every `run.json`, and it is
+still on disk at 2 min 18.7 s — so the recording is the one described above.
+Verified against the saved manifests: silence-trimming removed **18.9 s of
+138.7 s, 13.6%**, matching the "19 s (14%)" claimed. The guard suppressed nothing
+on any backend. Scribe's "obviously" → "absolute", turbo's "Terragrunt" → "terror
+grunt", and Parakeet missing both "Raghunathan" and "Terragrunt" all reproduce in
+the saved transcripts.
+
+Two caveats the table does not carry on its own, both earned by going back to the
+manifests rather than trusting the numbers:
+
+- **Decode times are single runs and move a lot.** The same model on the same
+  file was recorded at 10.4 s, 12.4 s and 15.1 s across three saved runs of
+  `whisper-1` — a 46% spread. Read the column as an order of magnitude, not as a
+  benchmark, and do not compare two rows that differ by less than a few seconds.
+- **The per-backend `N / 12` scores are not reproducible from anything saved.**
+  The twelve-item checklist was never written down, so the scores cannot be
+  recomputed, and one attribution does not survive the check: the only
+  `faster-whisper large-v3` run on disk transcribes "Terragrunt" **correctly**,
+  while the "terror grunt" error at that backend belongs to `turbo`. Tracked in
+  `claude-skills-luwe` along with a re-measurement.
 
 The twelve checks are specific things in the audio that are known to be hard:
 technical proper nouns (Terragrunt, EKS/AKS, Cloudflare Access, Postgres), an
@@ -316,6 +350,7 @@ Per hour of audio, from each provider's published pricing (verified 2026-09-04):
 | `groq` | whisper-large-v3-turbo | **0.04** | no |
 | `groq` | whisper-large-v3 | 0.111 | no |
 | `elevenlabs` | scribe_v2 | 0.22 | **yes, up to 32** |
+| `gemini` | gemini-3.5-transcribe | 0.306 | **yes, up to 3** |
 | `openai` | whisper-1 | 0.36 | no |
 
 Silence-trimming happens *before* upload, so you are billed for the trimmed
@@ -343,9 +378,44 @@ Only when you ask for it by name. First you get this, and a prompt:
 Silence is trimmed *before* uploading, so it cuts the bill as well as the
 hallucinations — on a 47-second call with a silent head, 12 seconds were
 actually sent. The block says "up to" because it has to print before any work
-happens. Keys are read from `GROQ_API_KEY` or `OPENAI_API_KEY` only —
-never a flag, never printed, never written into the run manifest. In a
-non-interactive session an unconfirmed upload is refused rather than assumed.
+happens. In a non-interactive session an unconfirmed upload is refused rather
+than assumed.
+
+Keys are read from the environment, one per backend, and nowhere else — never a
+flag, never printed, never written into the run manifest:
+
+| backend | environment variable | endpoint |
+|---|---|---|
+| `groq` | `GROQ_API_KEY` | `api.groq.com` |
+| `openai` | `OPENAI_API_KEY` | `api.openai.com` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` | `api.elevenlabs.io` |
+| `gemini` | `GEMINI_API_KEY` | `generativelanguage.googleapis.com` |
+
+### `--backend gemini` has two properties the others do not
+
+Verified against Google's API reference and a live run on **2026-09-06**:
+
+- **It uploads twice.** Gemini has no single-shot transcription endpoint. The
+  audio goes to Google's Files API first, and the transcription request then
+  carries only the URI that came back. **Google keeps that upload for 48 hours**
+  before deleting it — the disclosure block says so, because you cannot see it
+  from the command line otherwise. The second leg posts to a URL Google chooses
+  and returns in a header; that URL is checked for `https` and a
+  `googleapis.com` host before any audio follows it.
+- **Its ceiling is 30 minutes, not the hour Google's page leads with.** The hour
+  applies only when word timestamps and diarization are off, and this backend
+  always asks for both — without word offsets there is no clock to map back onto
+  your file, and the `.srt` could not be built. A longer recording is refused
+  before the upload starts, not after.
+
+**Gemini's `smart` mode is deliberately not offered.** It is the model's headline
+feature — it strips filler words, resolves spoken self-corrections and reflows
+the text — and Google's own reference says why it cannot be used here: *"Smart
+transcription (`"smart"`) is incompatible with `timestamp_granularities` and
+`diarization_mode`."* No word timing, no speaker labels, and a transcript that is
+a model's tidied version of what was said rather than what was said. Cleaning up
+the prose belongs at the **notes** step, one stage later, where it is labelled a
+summary and checked. See `references/backends.md`.
 
 ## It produces a draft, not a verified record
 
@@ -388,10 +458,13 @@ call did not cover". It reads as a write-up by someone who was in the room, and
 it never mentions a recording, a transcript, or that a machine was involved.
 
 **It cannot tell you who was speaking.** No Whisper backend returns a speaker
-field — not mlx-whisper, faster-whisper, Groq or OpenAI. Diarisation would mean a
-separate gated model and a multi-GB torch install, and it would still only produce
-`Speaker 1` / `Speaker 2`, which this register forbids as a decoder artefact. So
-the attendees, the meeting date and the title are supplied by you:
+field — not mlx-whisper, faster-whisper, Groq or OpenAI. Two network backends do
+diarize: `elevenlabs` (up to 32 speakers) and `gemini` (up to 3). Neither solves
+this, because both return positional labels rather than names — `speaker_0` and
+`spk:0`, the formats measured from live responses on 2026-09-04 and 2026-09-06 —
+and this register forbids a raw decoder label outright. What they buy you is that
+the mapping is possible *from the transcript* instead of from memory. The
+attendees, the meeting date and the title are still supplied by you:
 
 ```bash
 ./scripts/summarize.py transcript.md --backend groq \

@@ -180,7 +180,7 @@ The cross-platform NeMo path (`nemo_toolkit[asr]`) is **not** verified.
 on the MLX path only; whether NeMo's own decoder shows the same overrun is
 untested.
 
-## ElevenLabs Scribe: the only backend that knows who spoke
+## ElevenLabs Scribe: words, not segments, and 32 speakers
 
 Verified against the API reference 2026-09-04: `POST https://api.elevenlabs.io/v1/speech-to-text`,
 auth header `xi-api-key` (**not** bearer), `model_id=scribe_v2`, files to 3 GB, audio to 10 hours.
@@ -193,7 +193,9 @@ segmentation is ours, grouping on speaker change and a 1 s pause. Every other
 backend hands us segments.
 
 **It diarizes, up to 32 speakers.** No Whisper backend and not Parakeet returns
-any speaker field. This is the one place attribution is available at all.
+any speaker field. Gemini also diarizes, but only up to 3 (more is described as
+experimental), so Scribe is the one to reach for when a meeting has more people
+in it than a stand-up.
 
 **Verified live on 2026-09-04**, not merely documented: two distinct voices came
 back as `speaker_0` and `speaker_1`; the same audio with `diarize=false` returned
@@ -229,8 +231,8 @@ not threshold a number it has not calibrated. The backend-independent rules
 
 **$0.22 per hour**, verified from elevenlabs.io/pricing/api on 2026-09-04 and
 flat across every plan tier — only the included hours differ, not the rate.
-Realtime is $0.39. That puts Scribe between Groq and OpenAI, and it is the only
-one of the four that diarizes.
+Realtime is $0.39. That puts Scribe between Groq and OpenAI. Gemini, added
+2026-09-06 at a derived $0.306, sits between them and also diarizes.
 
 Diarization is on by default in the backend and is not currently exposed as a CLI
 flag; if you need it off, that is a small addition to `transcribe.py`.
@@ -326,8 +328,10 @@ response shape is not knowable from the docs.
 **One accuracy note from the same run**, on 7.4 s of synthesised speech:
 "Terragrunt" came back as "peregrine". That is a single data point on synthetic
 audio and is not comparable to the measured table in `README.md`, but it is the
-same failure mode every other backend showed on that word — no backend here has
-got it right yet.
+same failure mode most backends show on that word. Three of the eight rows in
+README's measured table DO get it — `openai`, `mlx-whisper large-v3` and
+`elevenlabs` — so "nothing gets Terragrunt" would be wrong; five of eight is the
+honest figure.
 
 ## Language: translating, and recordings that change language
 

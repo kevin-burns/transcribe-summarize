@@ -483,6 +483,51 @@ a model's tidied version of what was said rather than what was said. Cleaning up
 the prose belongs at the **notes** step, one stage later, where it is labelled a
 summary and checked. See `references/backends.md`.
 
+## What has actually been run
+
+Every claim on this page came from one of three places, and they are not worth the same.
+This table says which, per path, as of **2026-09-06**. It exists because three separate
+things in this repository were written from a vendor's documentation and turned out to be
+wrong the first time a real response came back.
+
+**live** — exercised end to end against the real engine or API, and asserted.
+**offline** — request shape, parsing and refusals covered by tests, response never seen.
+**unrun** — implemented, reviewed, never executed. Believe accordingly.
+
+| path | status | what was run |
+|---|---|---|
+| `mlx-whisper` transcribe | **live** | 3 runs on the 2 min 19 s recording, scored 12/14 and 11/14 |
+| `mlx-whisper` `--task translate` | **live** | German clip → English; and turbo correctly refused |
+| `faster-whisper` transcribe | **live** | 3 runs, both models |
+| `faster-whisper` `--task translate` | **live** | German clip → English, `large-v3` |
+| `faster-whisper` `--multilingual` | **live** | 35 s German→Spanish clip, both with and without the flag |
+| `parakeet` | **live** | 3 runs, `parakeet-mlx` on Apple Silicon |
+| `parakeet` on NeMo (non-Apple) | **unrun** | never installed here; see `references/backends.md` |
+| `openai` transcribe | **live** | 2 runs, plus a dedicated live test |
+| `openai` `--task translate` | **unrun** | endpoint verified from OpenAI's docs only |
+| `elevenlabs` transcribe | **live** | 2 runs, plus a live test |
+| `elevenlabs` diarization | **live** | two synthesised voices → `speaker_0` / `speaker_1`, format asserted |
+| `gemini` transcribe | **live** | 2 runs, plus 5 live tests |
+| `gemini` diarization | **live** | two voices → `spk:0` / `spk:1`, format asserted |
+| `groq` (any path) | **unrun** | no API key on the machine this was built on |
+
+**The two `unrun` API rows are the honest risk here.** Both are shaped from published
+documentation and covered by offline tests, which is exactly the state Gemini was in the
+morning of 2026-09-06 — when its first live response returned `spk:0` and corrected two
+documents that had confidently said `spk_1`. A request that is built correctly is not a
+response you have seen.
+
+Three findings that only a live run produced, kept here as the argument for the column:
+
+- **`large-v3-turbo` cannot translate and does not fail.** It returned German under a
+  header saying "Translated to English". Turbo is the default model, so the broken path
+  was the common one. Every unit test passed.
+- **Gemini's speaker labels use a colon.** Written as `spk_1` from the API reference; they
+  are `spk:0`. The checker built from the reference still missed the real string.
+- **ElevenLabs is not reproducible.** Two identical runs returned different transcripts,
+  scoring 8/14 and 12/14; the worse one dropped a budget figure. Nothing in either response
+  indicates which you got.
+
 ## It produces a draft, not a verified record
 
 Machine transcription is confidently wrong in ways no threshold catches.

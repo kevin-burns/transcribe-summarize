@@ -941,3 +941,20 @@ def test_gemini_diarizes_up_to_eight_speakers_not_three():
         text = (root / doc).read_text()
         assert "gemini` (up to 3)" not in text, f"{doc} still says 3 speakers"
         assert "up to 3 speakers" not in text, f"{doc} still says 3 speakers"
+
+
+def test_the_single_detection_warning_names_translation_not_bad_decoding():
+    """What mlx-whisper actually does to a later language is not garble it -- it
+    TRANSLATES it into the opening language, fluently, saying nothing. Measured
+    2026-09-06 on 29.5 s of English followed by German: "Ich schicke die
+    Aufstellung heute Nachmittag herum" came back as "I'm going to send the show
+    today to the next day".
+
+    A warning that says "decoded as the first language" invites the reader to
+    expect garbage and skim past clean-looking English. It has to say translated,
+    and it has to name the backends that do not do this."""
+    note = backends.check_multilingual(backends.REGISTRY["mlx-whisper"], False)
+    assert note
+    assert "TRANSLATED" in note, "the warning must say what actually happens"
+    for better in ("faster-whisper", "parakeet", "gemini"):
+        assert better in note, f"the warning does not point at {better}"

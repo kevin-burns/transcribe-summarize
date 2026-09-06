@@ -331,8 +331,11 @@ def check_multilingual(info: BackendInfo, want: bool) -> str | None:
         if info.multilingual == "no":
             return (
                 f"{info.name} detects the language ONCE, from the first 30 seconds, and applies it "
-                f"to the whole recording. If this audio changes language part-way, that part will "
-                f"be decoded as the first language and the transcript will not say so."
+                f"to the whole recording. If the audio changes language after that, it is not "
+                f"decoded badly -- it is silently TRANSLATED into the first language, and the "
+                f"transcript does not say so. Measured 2026-09-06: German after 30 s of English "
+                f"came back as English, and one sentence came back as nonsense. On a mixed "
+                f"recording use faster-whisper, parakeet or gemini instead."
             )
         return None
     if info.multilingual == "flag":

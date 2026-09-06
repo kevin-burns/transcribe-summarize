@@ -9,7 +9,7 @@ declared clean.
 |---|---|---|---|---|
 | `mlx-whisper` | **Apple Silicon only** | `mlx-whisper>=0.4.2` | **full** | no |
 | `faster-whisper` | macOS / Windows / Linux | `faster-whisper>=1.2` | **full** | no |
-| `parakeet` | **macOS verified**, others untested | `parakeet-mlx` (Apple Silicon) or `nemo_toolkit[asr]` | **partial — see below** | no |
+| `parakeet` | **Apple Silicon only today**; cross-platform is planned on `sherpa-onnx` | `parakeet-mlx` | **partial — see below** | no |
 | `groq` | any | none — stdlib `urllib` | **full** | **yes** |
 | `openai` | any | none — stdlib `urllib` | **full** | **yes** |
 | `elevenlabs` (Scribe) | any | none — stdlib `http.client` | **partial** | **yes** |
@@ -72,6 +72,12 @@ a clean-looking transcript.
 On Apple Silicon this is solved: `parakeet-mlx` is light, and its model
 (`mlx-community/parakeet-tdt-0.6b-v3`) is the one several macOS dictation apps
 already download, so it is frequently on the machine before this skill asks.
+
+**It is genuinely multilingual, verified rather than assumed.** `parakeet-tdt-0.6b-v3`
+is documented as covering 25 European languages, and German audio came back as
+German on 2026-09-06 — with one truncation, "verschoben" rendered "verschob". On
+the 43 s English-then-German clip it kept the German as German, which the Apple
+Silicon Whisper default did not.
 
 **The non-Apple path is still the open question**, and NeMo is probably the wrong
 answer to it. Verified 2026-09-04 against PyPI and HuggingFace:
@@ -174,7 +180,13 @@ suggesting an *overlap* test with no number attached.
 
 ### The non-Apple runtime is still open
 
-The cross-platform NeMo path (`nemo_toolkit[asr]`) is **not** verified.
+The cross-platform path is **not built**, and NeMo is not the plan: `sherpa-onnx`
+is, for the reasons in the table above (one dependency against torch, an 11.4 MB
+wheel against a multi-GB tree). Tracked as `claude-skills-rq95`. Nothing here
+should be read as saying `nemo_toolkit[asr]` is coming.
+
+The old NeMo path (`nemo_toolkit[asr]`) is **not** verified and probably never
+will be.
 `scripts/tslib/backends/parakeet.py` supports both runtimes and prefers
 `parakeet-mlx` when importable. Note that the beam-decoding fix above is applied
 on the MLX path only; whether NeMo's own decoder shows the same overrun is
@@ -379,15 +391,20 @@ honest figure.
 
 ## Language: translating, and recordings that change language
 
-| backend | `--task translate` | language change mid-recording |
-|---|---|---|
-| `mlx-whisper` | yes, **`--model large-v3` only** | no -- one detection, first 30 s |
-| `faster-whisper` | yes, **`--model large-v3` only** | **yes**, `--multilingual` |
-| `parakeet` | no | no |
-| `groq` | yes, `whisper-large-v3` only | no |
-| `openai` | yes, `whisper-1` | no |
-| `elevenlabs` | no | no |
-| `gemini` | no | **yes, always** |
+| backend | `--task translate` | `--prompt` | mixed-language recording, **measured** |
+|---|---|---|---|
+| `mlx-whisper` | yes, **`--model large-v3` only** | yes | **NO — silently translates into the opening language** |
+| `faster-whisper` | yes, **`--model large-v3` only** | yes | **yes**, and correct even without `--multilingual` |
+| `parakeet` | no | yes | **yes** |
+| `groq` | yes, `whisper-large-v3` only | yes | untested |
+| `openai` | yes, `whisper-1` | yes | untested |
+| `elevenlabs` | no | yes | untested |
+| `gemini` | no | **NO — API 400 with word timestamps** | **yes**, code-switching is unconditional |
+
+The last column is what a 43 s English-then-German clip actually returned on
+2026-09-06, not what a vendor claims. `mlx-whisper` is the Apple Silicon default
+and is the one that fails, which is the single most useful line in this file for
+anyone whose meetings are not monolingual.
 
 **There is no target language, only English.** `mlx_whisper/decoding.py` states it
 in one line: *"whether to perform X->X `transcribe` or X->English `translate`"*.
@@ -412,7 +429,40 @@ exception, no warning. Groq's own comparison table marks translation "No" for
 whisper-large-v3-turbo, so it is a property of the distillation rather than of
 any one host, and the registry refuses it on every Whisper backend.
 
-**The single-detection trap, measured.** A 35 s clip, 23 s of German then Spanish:
+**The single-detection trap, measured twice, and the second one is the case that
+matters.** A 43 s clip: 29.5 s of English, then German — so the German falls in a
+later decode window than the one the language was detected from.
+
+| backend | the German half |
+|---|---|
+| `mlx-whisper` | "the budget is located at 42.000€ against a prognosis of 38.000€ … I'm going to send the show today to the next day" |
+| `faster-whisper` large-v3 | "das Budget lag bei 42.000 Euro gegenüber einer Prognose von 38.000 …" |
+| `faster-whisper` + `--multilingual` | identical to the line above |
+| `parakeet` | "das Budget lag by 42.000 gegenüber einer Prognose von 38.000 …" |
+| `gemini` | "das Budget lag bei 42.000 Euro gegenüber einer Prognose von 38.000 …" |
+
+**mlx-whisper is the Apple Silicon default and it is the one that fails.** It did
+not garble the German, it translated it, and *"Ich schicke die Aufstellung heute
+Nachmittag herum"* came back as *"I'm going to send the show today to the next
+day"* — a sentence that is not a translation of anything.
+
+**Two earlier attempts at this test proved nothing, and are kept here because the
+reason is the useful part.** A 13 s German→Spanish clip and a 25 s
+English→German clip both came back correct on every backend, `mlx-whisper`
+included. Both switches fell inside the **first 30-second window**, which is the
+one the detection reads, so there was nothing for a per-file decision to get
+wrong. A test clip short enough to be convenient is short enough to be a single
+window. Make the second language start after 30 seconds or the test is measuring
+nothing.
+
+**`--multilingual` has not yet been shown to rescue a case that would otherwise
+fail.** On both mixed clips `faster-whisper large-v3` was already correct without
+it. The flag is exposed because the engine documents its detection as per-file by
+default and per-segment when asked, and one recording is not a proof either way.
+Do not claim more for it than that.
+
+**An earlier single-detection measurement**, kept for the second language pair. A
+35 s clip, 23 s of German then Spanish:
 
     without --multilingual   [00:30] und der Prognose war 38.000.
                                      Wir müssen ihn vor Freitag korrigieren.

@@ -229,32 +229,63 @@ Three things to know, all of them measured on 2026-09-06:
   a verbatim one: *"**Translated to English.** These are not the words that were
   spoken; the audio is in de."*
 
-**`--multilingual` is for a recording that changes language part-way.** Whisper
-decides the language **once, from the first 30 seconds**, and applies it to the
-rest of the file. Here is what that costs, on a 35 s clip that runs 23 s in
-German and then switches to Spanish:
+### A meeting where people speak different languages
 
-```
-without --multilingual   [00:00:30]  und der Prognose war 38.000.
-                                     Wir müssen ihn vor Freitag korrigieren.
+This is the common case — you speak English, a colleague answers in German — and
+it is the one where the default backend on a Mac gets it wrong.
 
-with    --multilingual   [00:00:30]  y el pronóstico era de 38.000.
-                                     Necesitamos corregirlo antes del viernes.
-```
+**Whisper decides the language once, from the first 30 seconds, and applies it to
+the whole file.** Measured on a 43 s clip: 29.5 s of English, then German.
 
-The Spanish came back **as German**. Not garbled — translated, fluently, with no
-warning anywhere in the output. That is the failure this whole tool is built to
-surface, so the tool now prints the single-detection caveat on every run of a
-backend that cannot do better, whether or not you passed the flag.
+| backend | the German half came back as |
+|---|---|
+| `mlx-whisper` (Apple Silicon **default**) | **"the budget is located at 42.000€ against a prognosis of 38.000€ … I'm going to send the show today to the next day"** |
+| `faster-whisper` | "das Budget lag bei 42.000 Euro gegenüber einer Prognose von 38.000 …" |
+| `parakeet` | "das Budget lag by 42.000 gegenüber einer Prognose von 38.000 …" |
+| `gemini` | "das Budget lag bei 42.000 Euro gegenüber einer Prognose von 38.000 …" |
 
-`--multilingual` works on **`faster-whisper` only** — it is the one engine here
-that re-runs detection per segment. `gemini` does it unconditionally and says so.
-Everything else refuses the flag rather than accepting and ignoring it.
+`mlx-whisper` did not decode the German badly. It **translated it into English**,
+fluently, with nothing in the output saying so — and the last sentence, *"Ich
+schicke die Aufstellung heute Nachmittag herum"* ("I'll circulate the breakdown
+this afternoon"), became **"I'm going to send the show today to the next day"**.
+Confident, readable, and wrong. That is the failure this whole tool exists to
+surface, so the caveat now prints on every run of a backend that cannot do better,
+whether or not you passed a flag.
 
-For a genuinely mixed call, the combination that works today is `--backend
-gemini` for a faithful code-switched transcript, then **English notes** at the
-summary step. Translation is an edit, and edits belong in the summary rather than
-in a record of what was said.
+**So: on a mixed-language recording, do not use `mlx-whisper`.** Use
+`faster-whisper`, `parakeet` or `gemini`.
+
+**Where the boundary actually is.** On a 25 s version of the same conversation —
+English for 11 s, then German — **every** backend got it right, `mlx-whisper`
+included, because the whole clip fits inside one 30-second decode window. The
+failure needs a later window to be a different language than the first, which is
+what any real meeting looks like and what a short test clip does not. Two earlier
+tests here proved nothing for exactly that reason, and are written up in
+`references/backends.md` rather than quietly discarded.
+
+**`--multilingual` re-runs detection on every segment** and works on
+`faster-whisper` only; `gemini` does it unconditionally. Everything else refuses
+the flag rather than accepting and ignoring it. Honest caveat: on both mixed clips
+tested here `faster-whisper large-v3` was **already correct without it**, so the
+flag has not yet been shown to rescue a case that would otherwise fail — it is
+there because the engine's own detection is documented to be per-file by default,
+and one recording is not a proof.
+
+### Which language do I get?
+
+**The transcript is always in the language that was spoken.** There is no default
+to English and no setting that changes it — German audio produces a German
+transcript on every backend here, verified on all five.
+
+**`--task translate` produces English, and only English.** Not "a target
+language" — Whisper has exactly one translation direction. There is no way to ask
+any backend in this skill for a German transcript of English speech.
+
+**So if your colleague wants it in German, that is the notes step, not the
+transcript.** The transcript stays verbatim in whatever was said; the summary is
+written by a model that will write it in any language you ask for. That split is
+deliberate — translating a record changes what the record *is*, and a
+record-of-what-was-said should not quietly become a translation of it.
 
 ## Backends
 
@@ -276,8 +307,11 @@ The guard's strong rules read Whisper decoder metrics. `faster-whisper`, Groq an
 OpenAI all return them, so the guard is literally the same code. **Parakeet
 returns none of them** and falls back to a repetition heuristic; the tool prints
 that fact on every run rather than letting you infer it from a clean-looking
-transcript. Parakeet has also never been run against a real NeMo install — see
-`references/backends.md`.
+transcript. **Parakeet runs on Apple Silicon only today**, via `parakeet-mlx`; the
+cross-platform path is not written yet, and the plan is `sherpa-onnx` (one
+dependency, an 11 MB wheel) rather than `nemo_toolkit[asr]` (torch, multi-GB) —
+see `references/backends.md`. It does handle other languages: German audio came
+back as German, verified 2026-09-06.
 
 ## What these backends actually did
 
@@ -505,7 +539,9 @@ wrong the first time a real response came back.
 | `faster-whisper` `--task translate` | **live** | German clip → English, `large-v3` |
 | `faster-whisper` `--multilingual` | **live** | 35 s German→Spanish clip, both with and without the flag |
 | `parakeet` | **live** | 3 runs, `parakeet-mlx` on Apple Silicon |
-| `parakeet` on NeMo (non-Apple) | **unrun** | never installed here; see `references/backends.md` |
+| `parakeet` on German | **live** | returned German, confirming the multilingual claim |
+| `parakeet` on a non-Apple runtime | **unrun** | needs `sherpa-onnx`; not built yet |
+| mixed-language recording | **live** | 43 s English→German through all five backends |
 | `openai` transcribe | **live** | 2 runs, plus a dedicated live test |
 | `openai` `--task translate` | **unrun** | endpoint verified from OpenAI's docs only |
 | `elevenlabs` transcribe | **live** | 2 runs, plus a live test |
@@ -535,6 +571,14 @@ Three findings that only a live run produced, kept here as the argument for the 
   transcription" sounding like it might. Probed three ways on German audio — the shipped
   config, `language_codes: ["en-US"]`, and a plain instruction *"give the result in
   English"* sent alongside the audio. All three returned the German unchanged.
+- **The Apple Silicon default silently translates a mixed-language call.** 29.5 s of
+  English then German: `mlx-whisper` returned the German half in English, rendering "Ich
+  schicke die Aufstellung heute Nachmittag herum" as "I'm going to send the show today to
+  the next day". Every other backend returned German. Two shorter versions of the same test
+  passed on every backend, because the switch fell inside the first decode window.
+- **`--prompt` was an unconditional HTTP 400 on Gemini.** `custom_vocabulary` cannot be
+  combined with the word timestamps this backend always requests. The failure arrived after
+  the upload, so the audio had already been sent and billed.
 - **Gemini's documented `output_text` field does not exist.** The API reference shows
   `"output_text": "transcribed text"` at the top level of the reply; it was absent from all
   four live responses. The transcript is in `steps[].content[].text`. Reading the documented

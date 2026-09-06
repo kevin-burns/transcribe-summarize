@@ -165,17 +165,33 @@ around that; there is no turbo build that translates.
 `parakeet`, `elevenlabs` and `gemini` cannot translate at all and refuse. `groq`
 and `openai` can, through a separate `/audio/translations` route, English only.
 
-**A mixed-language recording: `--multilingual`.** Whisper decides the language
-**once, from the first 30 seconds**. On a clip that ran 23 s in German then
-switched to Spanish, the Spanish came back rendered as fluent German, with no
-warning. `--multilingual` re-detects per segment and works on **faster-whisper
-only**; `gemini` does it unconditionally.
+**A mixed-language recording: DO NOT USE `mlx-whisper`.** This is the important
+one, because mlx-whisper is the default on Apple Silicon and it fails silently.
+Whisper decides the language once, from the first 30 seconds. Measured 2026-09-06
+on 29.5 s of English followed by German: mlx-whisper returned the German half
+**translated into English**, and rendered "Ich schicke die Aufstellung heute
+Nachmittag herum" as "I'm going to send the show today to the next day". Fluent,
+confident, wrong, and nothing in the output said so.
 
-**What to tell a user who asks for English notes from a mixed call.** Two steps,
-both of which already exist: `--backend gemini` gives a faithful code-switched
-transcript, then you write the notes in English. Do not reach for `--task
-translate` on a mixed recording -- it can only translate from the one language it
-detected, so the other half is lost twice over.
+`faster-whisper`, `parakeet` and `gemini` all returned the German as German. Pick
+one of those when the user says the call has more than one language in it. The
+tool prints the caveat at run time on backends that cannot do better, but do not
+rely on the user reading it.
+
+`--multilingual` re-detects per segment, on **faster-whisper only**; `gemini` does
+it unconditionally. Note that faster-whisper was already correct WITHOUT the flag
+on both clips tested, so it is not the thing that saves you -- the backend choice
+is.
+
+**WHICH LANGUAGE THE TRANSCRIPT COMES OUT IN.** Always the one that was spoken.
+There is no default to English and no setting that changes it. `--task translate`
+produces English and only English -- there is no way to ask any backend here for
+a German transcript of English speech.
+
+**So a request like "give my colleague the transcript in German" is a NOTES job,
+not a transcript job.** Take the transcript verbatim in whatever was said, then
+write the notes document in German. You can write notes in any language; the
+transcript is a record and stays in the language of the room.
 
 ## The quality guard
 

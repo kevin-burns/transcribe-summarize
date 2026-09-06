@@ -69,13 +69,22 @@ Worth being explicit, because several of these are things people assume:
 - **It does not identify who is speaking**, except on `--backend elevenlabs` (up
   to 32 speakers) or `--backend gemini` (up to 8), and even there you get
   `speaker_0` or `spk:0`, not names. Attendees are something you tell it.
-- **It does not translate**, do real-time streaming, or handle multi-track audio.
-- **It does not edit your words.** The transcript is verbatim; judgement happens
-  in the notes, under a fixed register.
+- **It translates into English only, and only on request.** `--task translate` is
+  a Whisper feature and Whisper has exactly one direction, `X → English`. There is
+  no target-language setting, and no backend here can produce a German transcript
+  of English speech. Left to itself the transcript is in whatever language was
+  spoken. See "Which language do I get?".
+- **It does not do real-time streaming, or handle multi-track audio.**
+- **It does not edit your words.** The transcript is verbatim — with the single
+  exception of `--task translate`, which you have to ask for by name and which
+  says so at the top of the transcript it produces. Judgement happens in the
+  notes, under a fixed register.
 - **It does not make a recording lawful.** Keeping provenance out of a document
   changes what the document says, not what happened. Consent is yours to obtain.
-- **The quality guard is not equally strong everywhere.** Parakeet and ElevenLabs
-  return no Whisper metrics, so only the silence and repetition rules apply.
+- **The quality guard is not equally strong everywhere.** Parakeet, ElevenLabs and
+  Gemini return no Whisper metrics, so only the silence and repetition rules
+  apply. The tool says so on every run rather than letting you infer it from a
+  clean-looking transcript.
 
 ## Why this exists
 

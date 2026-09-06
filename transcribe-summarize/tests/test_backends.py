@@ -964,3 +964,40 @@ def test_the_single_detection_warning_names_translation_not_bad_decoding():
     assert "FLUENTLY" in note
     for better in ("faster-whisper", "parakeet", "gemini"):
         assert better in note, f"the warning does not point at {better}"
+
+
+def _not_do_section() -> str:
+    """README's "What it does NOT do" section, which is where stale claims collect."""
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    start = readme.index("## What it does NOT do")
+    return readme[start:readme.index("\n## ", start + 10)]
+
+
+def test_the_not_do_section_does_not_deny_a_capability_the_skill_has():
+    """This section is the densest concentration of claims a new feature can
+    falsify, and it is the one place the "universal claim" grep does not reach --
+    it says "It does not translate", not "no backend translates".
+
+    It shipped saying "It does not translate" for as long as --task translate
+    existed. Caught by a human reading the file, which is why the mechanical part
+    is now here."""
+    section = _not_do_section()
+    assert any(info.can_translate for info in backends.REGISTRY.values())
+    assert "does not translate" not in section.lower(), (
+        "README's NOT-do section still denies translation, but --task translate exists"
+    )
+    diarizing = sorted(n for n in ("elevenlabs", "gemini") if n in backends.REGISTRY)
+    for name in diarizing:
+        assert name in section, f"NOT-do section says nothing about {name} diarizing"
+
+
+def test_the_not_do_section_lists_every_metric_free_backend():
+    """'Parakeet and ElevenLabs return no Whisper metrics' was true until Gemini
+    landed, and then quietly understated which backends run a weakened guard --
+    the single most important caveat in the file."""
+    section = _not_do_section().lower()
+    metric_free = {n for n, i in backends.REGISTRY.items() if not i.has_whisper_metrics}
+    missing = sorted(n for n in metric_free if n not in section)
+    assert not missing, (
+        f"these backends return no Whisper metrics but the NOT-do section omits them: {missing}"
+    )

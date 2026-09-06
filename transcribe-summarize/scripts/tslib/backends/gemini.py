@@ -235,7 +235,9 @@ def build_body(
         },
     }
     if vocabulary:
-        # Documented cap is 1000 terms, "best results ... with up to 100".
+        # Documented cap is 1000 terms, "best results ... with up to 100". The
+        # caller is responsible for not reaching here while timestamps are on --
+        # see backends.check_prompt.
         config["custom_vocabulary"] = vocabulary[:1000]
 
     return {
@@ -381,9 +383,12 @@ def transcribe(
 ) -> Result:
     """Upload, transcribe, and return segments on the trimmed clock.
 
-    `prompt` is mapped to `custom_vocabulary`, which is the nearest real thing
-    Gemini offers: a list of terms to bias towards, not a decoder prefix. Split
-    on commas, because that is how a user writes a list of proper nouns.
+    `prompt` maps to `custom_vocabulary`, the nearest thing Gemini offers -- but
+    the API refuses it alongside word timestamps ("custom_vocabulary is
+    incompatible with timestamps", HTTP 400, reproduced 2026-09-06) and this
+    backend always asks for those. `backends.check_prompt` refuses the
+    combination before anything is uploaded; the mapping is kept because it is
+    correct for the day the incompatibility is lifted.
     """
     check_limits(wav)
 

@@ -282,6 +282,7 @@ def main() -> int:
         audio.assert_has_audio(args.audio)
         try:
             backends.check_task(info, args.task, model)
+            backends.check_prompt(info, args.prompt)
             multilingual_note = backends.check_multilingual(info, args.multilingual)
         except backends.UnsupportedOption as exc:
             die(str(exc))

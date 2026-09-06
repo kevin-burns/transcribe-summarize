@@ -897,3 +897,47 @@ def test_gemini_is_registered_as_unable_to_translate_because_it_was_probed():
     assert backends.REGISTRY["gemini"].can_translate is False
     with pytest.raises(backends.UnsupportedOption, match="cannot translate"):
         backends.check_task(backends.REGISTRY["gemini"], "translate", "gemini-3.5-transcribe")
+
+
+def test_prompt_is_refused_on_gemini_before_the_upload():
+    """REPRODUCED LIVE 2026-09-06:
+
+        HTTP 400 {"error":{"message":"custom_vocabulary is incompatible with
+        timestamps.","code":"invalid_request"}}
+
+    --prompt maps to custom_vocabulary, and this backend always requests word
+    timestamps because without them there is no clock to map back. The API
+    reference states it -- "Incompatible with speaker diarization and word-level
+    timestamps" -- in a parameter table that the summarised fetch of the same page
+    did not carry. It was found by reading the page itself.
+
+    Refused BEFORE the upload: the 400 arrives after the audio is on Google's
+    servers and billed."""
+    gemini_info = backends.REGISTRY["gemini"]
+    with pytest.raises(backends.UnsupportedOption, match="incompatible with timestamps"):
+        backends.check_prompt(gemini_info, "Terragrunt, Northwind")
+    # The message has to say what to do instead, not just no.
+    try:
+        backends.check_prompt(gemini_info, "x")
+    except backends.UnsupportedOption as exc:
+        assert "--replace" in str(exc)
+
+    # No prompt, no conflict.
+    backends.check_prompt(gemini_info, None)
+    backends.check_prompt(gemini_info, "")
+    # And every other backend takes a prompt happily.
+    for name, info in backends.REGISTRY.items():
+        if name != "gemini":
+            backends.check_prompt(info, "Terragrunt")
+
+
+def test_gemini_diarizes_up_to_eight_speakers_not_three():
+    """The blog post says "up to three speakers"; the API reference says "Up to 8
+    speakers are supported (attribution for 3 or more speakers is experimental)".
+    The docs page is the authority and the blog was the looser summary -- which is
+    the same lesson as the label format, in the other direction."""
+    root = Path(__file__).resolve().parents[1]
+    for doc in ("README.md", "SKILL.md", "references/backends.md"):
+        text = (root / doc).read_text()
+        assert "gemini` (up to 3)" not in text, f"{doc} still says 3 speakers"
+        assert "up to 3 speakers" not in text, f"{doc} still says 3 speakers"

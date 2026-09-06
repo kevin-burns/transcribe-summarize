@@ -193,9 +193,9 @@ segmentation is ours, grouping on speaker change and a 1 s pause. Every other
 backend hands us segments.
 
 **It diarizes, up to 32 speakers.** No Whisper backend and not Parakeet returns
-any speaker field. Gemini also diarizes, but only up to 3 (more is described as
-experimental), so Scribe is the one to reach for when a meeting has more people
-in it than a stand-up.
+any speaker field. Gemini also diarizes, up to 8 (3 or more is described as
+experimental), so Scribe is still the one to reach for when a meeting has more
+people in it than a workshop.
 
 **Verified live on 2026-09-04**, not merely documented: two distinct voices came
 back as `speaker_0` and `speaker_1`; the same audio with `diarize=false` returned
@@ -265,7 +265,7 @@ pause — the same rule as the Scribe path, but a separate implementation, becau
 Scribe's spacing entries, logprobs and punctuation tokens have no equivalent here
 and merging them means a branch per provider at every step.
 
-**It diarizes up to 3 speakers** (more is described as experimental), against
+**It diarizes up to 8 speakers** (3 or more described as experimental), against
 Scribe's 32. Same caveat as Scribe: `spk:0` is a positional label, not a name.
 
 ### Why `smart` mode is not offered
@@ -307,6 +307,38 @@ diarization are enabled, and this backend always asks for both, so 30 minutes is
 the cap it actually operates under and the one it enforces. The check runs on the
 prepared file before the upload starts, reading the duration from the WAV header
 with stdlib `wave` rather than shelling out to ffprobe.
+
+**`--prompt` cannot be used with this backend.** It maps to `custom_vocabulary`,
+and the parameter table says of it: *"Incompatible with speaker diarization and
+word-level timestamps."* The Limitations section is blunter — *"the API rejects
+requests that specify `custom_vocabulary` alongside either feature."* Reproduced:
+
+    HTTP 400 {"error":{"message":"custom_vocabulary is incompatible with
+    timestamps.","code":"invalid_request"}}
+
+This backend always requests word timestamps, because without them there is no
+clock to map onto the original recording, so the combination can never work here.
+It is refused before the upload rather than after — the 400 arrives once the audio
+is already on Google's servers. Use `--replace 'wrong=right'` afterwards, or a
+local backend, where `--prompt` biases the decoder as normal.
+
+**How this was missed for a day, and the fix.** Both earlier passes over this page
+were `WebFetch`, which returns a small model's *summary* of a page rather than the
+page. That summary carried "up to 1,000 terms, best results with up to 100" and
+dropped the incompatibility sentence sitting in the same paragraph. Reading the
+page with `defuddle parse <url> --md` — 738 lines — surfaced it, along with two
+other corrections below. **For a vendor's API reference, snapshot the page; do not
+fetch a summary of it.**
+
+**Two more corrections from that snapshot:**
+
+- **Diarization goes to 8 speakers, not 3.** *"Up to 8 speakers are supported
+  (attribution for 3 or more speakers is experimental)."* The "three" figure came
+  from the launch blog post, which was the looser source.
+- **The page gets its own label format wrong.** It says diarization "tags each
+  segment with a speaker identifier like `spk_1` or `spk_2`". The live API returns
+  `spk:0` and `spk:1` — a colon, zero-indexed. Measured twice. The documentation
+  and the API disagree, and the API wins.
 
 **The reference is wrong about one field.** It documents `"output_text": "transcribed
 text"` at the top level of the reply. That key was **absent from all four live responses**

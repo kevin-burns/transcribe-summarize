@@ -37,6 +37,7 @@ __all__ = [
     "MissingDependency",
     "UnknownBackend",
     "check_multilingual",
+    "check_prompt",
     "check_task",
     "estimate_cost",
     "load",
@@ -86,6 +87,12 @@ class BackendInfo:
     # 30 seconds, so a call that opens in German and switches to Spanish is decoded
     # entirely as German, and the output does not say so.
     multilingual: Literal["no", "flag", "always"] = "no"
+
+    # Why --prompt cannot be used with this backend, or None if it can. Gemini is
+    # the only entry with one: its custom_vocabulary is documented "Incompatible
+    # with speaker diarization and word-level timestamps", and this backend needs
+    # word timestamps for the clock map, so the two can never coexist here.
+    prompt_conflict: str | None = None
     # One extra line printed inside the egress disclosure, for a provider
     # whose terms the user is agreeing to and cannot see from here (Gemini
     # stores the upload for 48 hours). None for everything else.
@@ -163,7 +170,7 @@ REGISTRY: dict[str, BackendInfo] = {
         platforms=("any",),
         default_model="scribe_v2",
         notes=(
-            "The only backend here that can attribute speakers -- diarization for up to 32. "
+            "Diarization for up to 32 speakers, the most of any backend here. "
             "Returns words rather than segments, so segmentation is ours. Labels are "
             "speaker_0/speaker_1, not names: a person still maps them, and notes_check "
             "rejects a raw label in a notes document. Pricing is not published in the API "
@@ -183,13 +190,21 @@ REGISTRY: dict[str, BackendInfo] = {
         platforms=("any",),
         default_model="gemini-3.5-transcribe",
         can_translate=False,
+        prompt_conflict=(
+            "gemini maps --prompt to custom_vocabulary, which the API refuses alongside word "
+            "timestamps: 'custom_vocabulary is incompatible with timestamps' (HTTP 400, "
+            "reproduced 2026-09-06). This backend always requests word timestamps, because "
+            "without them there is no clock to map back onto your recording, so the two can "
+            "never be combined. Fix known misrecognitions afterwards with --replace "
+            "'wrong=right', or use a local backend, where --prompt works."
+        ),
         # "Handles intra-sentence and inter-sentential code-switching without manual
         # configuration" -- unconditional, so there is nothing for a flag to switch.
         multilingual="always",
         notes=(
             "Opt-in only. The one backend here that uploads in TWO steps: the audio goes to "
             "the Files API first and the transcription request carries only the returned URI. "
-            "Diarizes up to 3 speakers (more is experimental) and returns word timestamps. "
+            "Diarizes up to 8 speakers (3 or more is experimental) and returns word timestamps. "
             "Its `smart` mode -- filler removal, self-correction resolution, auto-formatting -- "
             "is deliberately NOT offered: the API refuses timestamps and diarization alongside "
             "it, so there would be no clock to map back. Reads GEMINI_API_KEY from the "
@@ -289,6 +304,16 @@ def check_task(info: BackendInfo, task: str, model: str) -> None:
             f"--model {info.translate_models[0]}. "
             f"(Only {', '.join(info.translate_models)} supports the translations endpoint.)"
         )
+
+
+def check_prompt(info: BackendInfo, prompt: str | None) -> None:
+    """Refuse --prompt where the backend's API rejects it. Raises UnsupportedOption.
+
+    Checked BEFORE the upload, not after: the failure is an HTTP 400 that arrives
+    once the audio is already on the provider's servers and billed.
+    """
+    if prompt and info.prompt_conflict:
+        raise UnsupportedOption(info.prompt_conflict)
 
 
 def check_multilingual(info: BackendInfo, want: bool) -> str | None:

@@ -99,7 +99,7 @@ Never accept one as a flag, never echo one, never write one into a file.
 | `groq` | `GROQ_API_KEY` | `whisper-large-v3-turbo` | 0.04 | no |
 | `groq` | `GROQ_API_KEY` | `whisper-large-v3` (default) | 0.111 | no |
 | `elevenlabs` | `ELEVENLABS_API_KEY` | `scribe_v2` | 0.22 | up to 32 |
-| `gemini` | `GEMINI_API_KEY` | `gemini-3.5-transcribe` | 0.306 | up to 3 |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.5-transcribe` | 0.306 | up to 8 |
 | `openai` | `OPENAI_API_KEY` | `whisper-1` | 0.36 | no |
 
 ### `--backend gemini` — the two things to say before running it
@@ -285,7 +285,7 @@ this pipeline outside a Claude Code session; inside one it is a pointless upload
 
 **Almost no backend here identifies speakers.** Every Whisper engine and Parakeet
 return no speaker field at all. Two exceptions: `--backend elevenlabs` (Scribe)
-diarizes up to 32 speakers, and `--backend gemini` up to 3. Both return
+diarizes up to 32 speakers, and `--backend gemini` up to 8. Both return
 positional labels rather than names — `speaker_0` and `spk:0` respectively, the
 formats measured from live responses on 2026-09-04 and 2026-09-06 — and the
 register forbids a raw label in a notes document, in either format. So they tell

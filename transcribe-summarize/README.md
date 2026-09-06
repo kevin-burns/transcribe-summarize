@@ -67,7 +67,7 @@ Worth being explicit, because several of these are things people assume:
   `.srt` at all. Filler comes out at the **notes** step instead, so a raw
   transcript stays verbatim and uncleaned.
 - **It does not identify who is speaking**, except on `--backend elevenlabs` (up
-  to 32 speakers) or `--backend gemini` (up to 3), and even there you get
+  to 32 speakers) or `--backend gemini` (up to 8), and even there you get
   `speaker_0` or `spk:0`, not names. Attendees are something you tell it.
 - **It does not translate**, do real-time streaming, or handle multi-track audio.
 - **It does not edit your words.** The transcript is verbatim; judgement happens
@@ -419,7 +419,7 @@ Per hour of audio, from each provider's published pricing (verified 2026-09-04):
 | `groq` | whisper-large-v3-turbo | **0.04** | no |
 | `groq` | whisper-large-v3 | 0.111 | no |
 | `elevenlabs` | scribe_v2 | 0.22 | **yes, up to 32** |
-| `gemini` | gemini-3.5-transcribe | 0.306 | **yes, up to 3** |
+| `gemini` | gemini-3.5-transcribe | 0.306 | **yes, up to 8** |
 | `openai` | whisper-1 | 0.36 | no |
 
 Silence-trimming happens *before* upload, so you are billed for the trimmed
@@ -582,7 +582,7 @@ it never mentions a recording, a transcript, or that a machine was involved.
 
 **It cannot tell you who was speaking.** No Whisper backend returns a speaker
 field — not mlx-whisper, faster-whisper, Groq or OpenAI. Two network backends do
-diarize: `elevenlabs` (up to 32 speakers) and `gemini` (up to 3). Neither solves
+diarize: `elevenlabs` (up to 32 speakers) and `gemini` (up to 8). Neither solves
 this, because both return positional labels rather than names — `speaker_0` and
 `spk:0`, the formats measured from live responses on 2026-09-04 and 2026-09-06 —
 and this register forbids a raw decoder label outright. What they buy you is that

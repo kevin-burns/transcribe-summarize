@@ -17,7 +17,8 @@
     "these fail by producing a PLAUSIBLE wrong string rather than by producing nothing --",
     "'terror grunt' for Terragrunt, 'board packs up' for board pack -- and an expect-only",
     "check scores those as a simple miss rather than as the confident error they are.",
-    "A check must measure whether the CONTENT survived, not whether it was formatted a particular way. The figure checks were digit-only until 2026-09-06 and scored a correct spelled-out transcription as a miss -- found by an independent fact-check of the README, not by the suite."
+    "A check must measure whether the CONTENT survived, not whether it was formatted a particular way. The figure checks were digit-only until 2026-09-06 and scored a correct spelled-out transcription as a miss -- found by an independent fact-check of the README, not by the suite.",
+    "TWO KINDS OF CHECK, and confusing them is how the figure bug happened. For a PROPER NOUN the form IS the test: 'Terragrunt' spelled 'terror grunt' is the failure being measured, so a single spelling is correct and must not be widened. For a FIGURE, a DATE or a QUANTITY the form is incidental: 'forty-two thousand three hundred euros' and '42,300' are the same fact, and a pattern that accepts only one of them measures formatting instead of accuracy. Widen the second kind; never widen the first."
   ],
   "source": {
     "description": "scripted meeting, one speaker, laptop built-in microphone, real room",

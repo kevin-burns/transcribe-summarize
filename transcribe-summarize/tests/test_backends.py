@@ -956,5 +956,11 @@ def test_the_single_detection_warning_names_translation_not_bad_decoding():
     note = backends.check_multilingual(backends.REGISTRY["mlx-whisper"], False)
     assert note
     assert "TRANSLATED" in note, "the warning must say what actually happens"
+    # And that the translation is FLUENT. Calling it garbled or nonsense invites
+    # the reader to expect something they would notice; the measured failure was
+    # 'heute Nachmittag' (this afternoon) rendered 'to the next day', which reads
+    # perfectly and moves a stated commitment by a day.
+    assert "nonsense" not in note.lower(), "do not imply the output looks wrong; it does not"
+    assert "FLUENTLY" in note
     for better in ("faster-whisper", "parakeet", "gemini"):
         assert better in note, f"the warning does not point at {better}"

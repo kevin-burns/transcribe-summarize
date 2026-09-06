@@ -245,12 +245,23 @@ the whole file.** Measured on a 43 s clip: 29.5 s of English, then German.
 | `gemini` | "das Budget lag bei 42.000 Euro gegenüber einer Prognose von 38.000 …" |
 
 `mlx-whisper` did not decode the German badly. It **translated it into English**,
-fluently, with nothing in the output saying so — and the last sentence, *"Ich
-schicke die Aufstellung heute Nachmittag herum"* ("I'll circulate the breakdown
-this afternoon"), became **"I'm going to send the show today to the next day"**.
-Confident, readable, and wrong. That is the failure this whole tool exists to
-surface, so the caveat now prints on every run of a backend that cannot do better,
-whether or not you passed a flag.
+fluently, with nothing in the output saying so — and the translation is wrong in
+the way that is hardest to catch. *"Ich schicke die Aufstellung heute Nachmittag
+herum"* means "I'll circulate the breakdown this afternoon". It came back as
+**"I'm going to send the show today to the next day"**, on two lexically adjacent
+slips:
+
+- **`Nachmittag`** is "afternoon" — literally *nach Mittag*, after midday. It was
+  rendered as **"to the next day"**: a day rather than a time of day, so the
+  commitment moves by up to twenty-four hours.
+- **`Aufstellung`** is a breakdown or itemised list. It became **"the show"**,
+  plausibly by way of *Aufführung*, a performance.
+
+Neither is gibberish. Both produce a sentence an English reader would accept, and
+one of them changes when something is promised — which is exactly the class of
+error no confidence threshold catches, because the model was not uncertain. That
+is the failure this whole tool exists to surface, so the caveat prints on every
+run of a backend that cannot do better, whether or not you passed a flag.
 
 **So: on a mixed-language recording, do not use `mlx-whisper`.** Use
 `faster-whisper`, `parakeet` or `gemini`.
@@ -573,8 +584,9 @@ Three findings that only a live run produced, kept here as the argument for the 
   English"* sent alongside the audio. All three returned the German unchanged.
 - **The Apple Silicon default silently translates a mixed-language call.** 29.5 s of
   English then German: `mlx-whisper` returned the German half in English, rendering "Ich
-  schicke die Aufstellung heute Nachmittag herum" as "I'm going to send the show today to
-  the next day". Every other backend returned German. Two shorter versions of the same test
+  schicke die Aufstellung heute Nachmittag herum" ("I'll circulate the breakdown this
+  afternoon") as "I'm going to send the show today to the next day" — a fluent
+  mistranslation that moves a commitment by a day. Every other backend returned German. Two shorter versions of the same test
   passed on every backend, because the switch fell inside the first decode window.
 - **`--prompt` was an unconditional HTTP 400 on Gemini.** `custom_vocabulary` cannot be
   combined with the word timestamps this backend always requests. The failure arrived after

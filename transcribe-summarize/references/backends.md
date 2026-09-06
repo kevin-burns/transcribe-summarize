@@ -442,9 +442,22 @@ later decode window than the one the language was detected from.
 | `gemini` | "das Budget lag bei 42.000 Euro gegenüber einer Prognose von 38.000 …" |
 
 **mlx-whisper is the Apple Silicon default and it is the one that fails.** It did
-not garble the German, it translated it, and *"Ich schicke die Aufstellung heute
-Nachmittag herum"* came back as *"I'm going to send the show today to the next
-day"* — a sentence that is not a translation of anything.
+not garble the German, it translated it — badly, and in the way that is hardest to
+catch. *"Ich schicke die Aufstellung heute Nachmittag herum"* is "I'll circulate
+the breakdown this afternoon". It came back as *"I'm going to send the show today
+to the next day"*:
+
+| German | means | rendered as |
+|---|---|---|
+| `Nachmittag` | afternoon — literally *nach Mittag*, after midday | "to the next day" |
+| `Aufstellung` | a breakdown, an itemised list | "the show" (cf. *Aufführung*) |
+
+Both are lexically adjacent to something real, and both survive as fluent English.
+The first one moves a stated commitment by up to a day. **An earlier version of
+this file called it "not a translation of anything", which was wrong and made the
+finding sound milder than it is:** a reader told the output is garbled expects to
+notice it. Nobody notices a smooth mistranslation, and no confidence metric flags
+one, because the decoder was not uncertain.
 
 **Two earlier attempts at this test proved nothing, and are kept here because the
 reason is the useful part.** A 13 s German→Spanish clip and a 25 s

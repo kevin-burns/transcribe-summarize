@@ -334,7 +334,9 @@ def check_multilingual(info: BackendInfo, want: bool) -> str | None:
                 f"to the whole recording. If the audio changes language after that, it is not "
                 f"decoded badly -- it is silently TRANSLATED into the first language, and the "
                 f"transcript does not say so. Measured 2026-09-06: German after 30 s of English "
-                f"came back as English, and one sentence came back as nonsense. On a mixed "
+                f"came back as English, FLUENTLY and wrongly -- 'heute Nachmittag' (this "
+                f"afternoon) was rendered 'to the next day'. You will not spot that by reading. "
+                f"On a mixed "
                 f"recording use faster-whisper, parakeet or gemini instead."
             )
         return None

@@ -170,8 +170,13 @@ one, because mlx-whisper is the default on Apple Silicon and it fails silently.
 Whisper decides the language once, from the first 30 seconds. Measured 2026-09-06
 on 29.5 s of English followed by German: mlx-whisper returned the German half
 **translated into English**, and rendered "Ich schicke die Aufstellung heute
-Nachmittag herum" as "I'm going to send the show today to the next day". Fluent,
-confident, wrong, and nothing in the output said so.
+Nachmittag herum" -- "I'll circulate the breakdown this afternoon" -- as "I'm
+going to send the show today to the next day". Not gibberish: `Nachmittag`
+(afternoon) became a day rather than a time of day, so the commitment moved by
+up to a day, and `Aufstellung` (a breakdown) became "the show". Fluent,
+confident, wrong, and nothing in the output said so. Warn the user about the
+CONTENT, not just the language -- a mistranslation this smooth is not something
+they will spot by reading.
 
 `faster-whisper`, `parakeet` and `gemini` all returned the German as German. Pick
 one of those when the user says the call has more than one language in it. The

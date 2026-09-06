@@ -16,7 +16,8 @@
     "case-insensitive regexes over the transcript body. `reject` exists because several of",
     "these fail by producing a PLAUSIBLE wrong string rather than by producing nothing --",
     "'terror grunt' for Terragrunt, 'board packs up' for board pack -- and an expect-only",
-    "check scores those as a simple miss rather than as the confident error they are."
+    "check scores those as a simple miss rather than as the confident error they are.",
+    "A check must measure whether the CONTENT survived, not whether it was formatted a particular way. The figure checks were digit-only until 2026-09-06 and scored a correct spelled-out transcription as a miss -- found by an independent fact-check of the README, not by the suite."
   ],
   "source": {
     "description": "scripted meeting, one speaker, laptop built-in microphone, real room",
@@ -70,25 +71,25 @@
     {
       "id": "figure-units",
       "kind": "figure",
-      "expect": "\\b18\\b",
-      "note": "18 units off the old root configuration."
+      "expect": "(\\b18\\b|\\beighteen\\b)",
+      "note": "18 units off the old root configuration. Spoken as 'eighteen'."
     },
     {
       "id": "figure-budget",
       "kind": "figure",
-      "expect": "42[,.]?300",
-      "note": "42,300 euros. A four-figure-plus number with a separator, so formatting varies legitimately."
+      "expect": "(42[,.]?300|forty[- ]?two thousand,? three hundred)",
+      "note": "42,300 euros. MEASURED 2026-09-06: ElevenLabs rendered this as 'forty-two thousand three hundred euros' on one run and '€42,300' on the next, from the same audio. A digit-only pattern scored the first as a MISS for a figure that was transcribed perfectly, so the check was measuring whether a number had been digitised rather than whether it survived. Both forms count."
     },
     {
       "id": "figure-forecast",
       "kind": "figure",
-      "expect": "38[,.]?000",
-      "note": "Against a forecast of 38,000. Paired with the above; the overrun is the difference."
+      "expect": "(38[,.]?000|thirty[- ]?eight thousand)",
+      "note": "Against a forecast of 38,000. Spelled-out form accepted for the same reason as figure-budget -- most backends write this one in words."
     },
     {
       "id": "date-november",
       "kind": "date",
-      "expect": "14(th)?\\s+(of\\s+)?November",
+      "expect": "(14(th)?|fourteenth)\\s+(of\\s+)?November",
       "note": "Spoken as 'the fourteenth of November'. A date is the thing a reader acts on."
     },
     {
@@ -100,8 +101,8 @@
     {
       "id": "near-homophone-uptime",
       "kind": "near-homophone",
-      "expect": "99\\.95",
-      "note": "99.95% versus 99.5% in the same breath. mlx-whisper large-v3 rendered this as '99.5%, not Not 99.5%' -- it dropped the correction AND the distinguishing figure."
+      "expect": "(99\\.95|ninety[- ]?nine point nine five)",
+      "note": "99.95% versus 99.5% in the same breath. mlx-whisper large-v3 loses BOTH the figure and the word 'correction' that introduced it, rendering the sentence as '99.5%, not Not 99.5%' -- a correction that reads as if it were captured."
     },
     {
       "id": "board-pack",

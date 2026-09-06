@@ -722,8 +722,14 @@ def test_the_single_detection_warning_fires_when_multilingual_was_NOT_asked_for(
     note = backends.check_multilingual(backends.REGISTRY["mlx-whisper"], False)
     assert note and "ONCE" in note and "first 30 seconds" in note
 
-    # faster-whisper can be told to do better, so it gets no scary note by default.
-    assert backends.check_multilingual(backends.REGISTRY["faster-whisper"], False) is None
+    # faster-whisper WITHOUT the flag is the worst case to leave unwarned: it is
+    # the backend recommended for mixed recordings, and without --multilingual it
+    # fails exactly like the others. It used to return None here.
+    flag_note = backends.check_multilingual(backends.REGISTRY["faster-whisper"], False)
+    assert flag_note and "--multilingual" in flag_note, (
+        "the backend recommended for mixed audio must say the flag exists when it was not passed"
+    )
+    # With the flag, there is nothing left to warn about.
     assert backends.check_multilingual(backends.REGISTRY["faster-whisper"], True) is None
 
     # Gemini always does it, so the note says the flag is redundant, not refused.
@@ -1001,3 +1007,76 @@ def test_the_not_do_section_lists_every_metric_free_backend():
     assert not missing, (
         f"these backends return no Whisper metrics but the NOT-do section omits them: {missing}"
     )
+
+
+def test_registry_capabilities_match_each_backend_module_signature():
+    """The registry says which options a backend takes; transcribe.py forwards
+    them on that word alone. Nothing has been keeping the two in sync.
+
+    A backend added with can_translate=True but no `task` parameter raises
+    TypeError, which transcribe.py's broad handler reports as "<name> failed to
+    decode" -- a decode failure, when it is actually a contract violation in this
+    repository. Same for multilingual='flag' and `multilingual`.
+
+    Import errors are skipped, not failed: a backend's third-party dependency is
+    deliberately not installed for the offline suite."""
+    import importlib
+    import inspect
+
+    checked = 0
+    for name, info in backends.REGISTRY.items():
+        module_name = f"tslib.backends.{name.replace('-', '_')}"
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:  # pragma: no cover - depends on what is installed
+            continue
+        params = inspect.signature(module.transcribe).parameters
+        checked += 1
+        if info.can_translate:
+            assert "task" in params, (
+                f"REGISTRY[{name!r}].can_translate is True but {module_name}.transcribe() "
+                "takes no `task` parameter; transcribe.py would raise TypeError"
+            )
+        if info.multilingual == "flag":
+            assert "multilingual" in params, (
+                f"REGISTRY[{name!r}].multilingual == 'flag' but {module_name}.transcribe() "
+                "takes no `multilingual` parameter"
+            )
+        # And the converse: a backend must not quietly accept an option the
+        # registry says it cannot honour, because then the refusal is the only
+        # thing stopping it and a refusal can be removed by accident.
+        if not info.can_translate:
+            assert "task" not in params, (
+                f"{module_name}.transcribe() accepts `task` but REGISTRY[{name!r}] says it "
+                "cannot translate -- one of the two is wrong"
+            )
+    assert checked >= 4, f"only {checked} backend modules were importable; the test proved little"
+
+
+def test_gemini_finds_the_upload_url_whatever_case_the_server_used():
+    """HTTP header names are case-insensitive and `dict(headers.items())` is not.
+    Measured: dict(m.items()).get("X-Goog-Upload-URL") is None when the server
+    sent "x-goog-upload-url", while m.get(...) finds it. The live API happens to
+    send canonical casing, so this worked by luck rather than by design."""
+    calls: list[str] = []
+
+    def fake_send(host, method, path, body, headers, *, timeout, want_json=True):
+        calls.append(path)
+        if not want_json:  # the resumable upload's opening call
+            return {"x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/v1beta/files?id=1"}
+        return {"file": {"uri": "files/abc123"}}
+
+    original = gm._send
+    gm._send = fake_send  # type: ignore[assignment]
+    try:
+        wav = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "_case.wav"
+        wav.parent.mkdir(parents=True, exist_ok=True)
+        _write_silent_wav(wav, seconds=1)
+        try:
+            assert gm.upload(wav, key="decoy") == "files/abc123"
+        finally:
+            wav.unlink(missing_ok=True)
+    finally:
+        gm._send = original  # type: ignore[assignment]
+
+    assert len(calls) == 2, "expected the two-step resumable upload"

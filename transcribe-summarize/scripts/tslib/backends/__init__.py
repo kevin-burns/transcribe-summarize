@@ -136,7 +136,8 @@ REGISTRY: dict[str, BackendInfo] = {
         platforms=("any",),
         default_model="mlx-community/parakeet-tdt-0.6b-v3",
         notes=(
-            "UNTESTED on this machine. A CTC/TDT model, not Whisper: it returns none of "
+            "Verified live 2026-09-06 on Apple Silicon via parakeet-mlx, including German. "
+            "A CTC/TDT model, not Whisper: it returns none of "
             "avg_logprob/compression_ratio/no_speech_prob, so the hallucination guard's "
             "metric-based rules do not apply here -- only its metric-free repetition rule does."
         ),
@@ -328,6 +329,17 @@ def check_multilingual(info: BackendInfo, want: bool) -> str | None:
             f"so --multilingual is already in effect."
         )
     if not want:
+        if info.multilingual == "flag":
+            # This branch used to return None, which contradicted this
+            # function's own docstring and left the WORST case unwarned: the
+            # backend recommended for mixed recordings, being run without the
+            # flag that makes it handle them. The failure is identical to the
+            # "no" case below -- one detection, applied to the whole file.
+            return (
+                f"{info.name} detects the language once by default, from the first 30 seconds. "
+                f"If this recording changes language part-way, pass --multilingual to re-detect "
+                f"on every segment."
+            )
         if info.multilingual == "no":
             return (
                 f"{info.name} detects the language ONCE, from the first 30 seconds, and applies it "

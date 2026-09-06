@@ -264,7 +264,8 @@ specifically so a silent video is never uploaded and billed.
 
 Machine transcription is confidently wrong in ways no threshold catches. Measured
 on real audio in this project: `large-v3` silently dropped a speaker's spoken
-correction of a figure, and every backend heard "board pack" as "board packs up".
+correction of a figure, seven of eight backends heard "board pack" as "board
+packs up", and parakeet dropped the passage containing it altogether.
 Both read perfectly fluently. The quality guard catches inventions over silence;
 it cannot catch a plausible mis-hearing, and neither can you by reading the
 output.

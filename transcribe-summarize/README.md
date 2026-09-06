@@ -295,7 +295,8 @@ and one recording is not a proof.
 
 **The transcript is always in the language that was spoken.** There is no default
 to English and no setting that changes it — German audio produces a German
-transcript on every backend here, verified on all five.
+transcript on every backend tested — the four the mixed-language run covered:
+mlx-whisper, faster-whisper, parakeet and gemini.
 
 **`--task translate` produces English, and only English.** Not "a target
 language" — Whisper has exactly one translation direction. There is no way to ask
@@ -313,7 +314,7 @@ record-of-what-was-said should not quietly become a translation of it.
 |---|---|---|---|
 | `mlx-whisper` | Apple Silicon only | full | no |
 | `faster-whisper` | mac / Windows / Linux | full | no |
-| `parakeet` | mac / Windows / Linux | **repetition rule only** | no |
+| `parakeet` | **Apple Silicon only today** | **repetition rule only** | no |
 | `groq` | any | full | **yes** |
 | `openai` | any | full | **yes** |
 | `elevenlabs` (Scribe) | any | partial | **yes** |
@@ -329,7 +330,8 @@ returns none of them** and falls back to a repetition heuristic; the tool prints
 that fact on every run rather than letting you infer it from a clean-looking
 transcript. **Parakeet runs on Apple Silicon only today**, via `parakeet-mlx`; the
 cross-platform path is not written yet, and the plan is `sherpa-onnx` (one
-dependency, an 11 MB wheel) rather than `nemo_toolkit[asr]` (torch, multi-GB) —
+dependency; a 2.1 MB wheel on Apple Silicon, 4.4 MB on Linux x86_64) rather than
+`nemo_toolkit[asr]` (torch, multi-GB) —
 see `references/backends.md`. It does handle other languages: German audio came
 back as German, verified 2026-09-06.
 
@@ -353,30 +355,45 @@ Local backends ran three times, network backends twice.
 | backend | model | accuracy | decode, median (range) | what it got wrong |
 |---|---|---|---|---|
 | `openai` | whisper-1 | **13 / 14** | 10.1 s (9.6–10.6) | board pack |
+| `elevenlabs` | scribe_v2 | **13 / 14** | 9.5 s (9.5–9.6) | board pack |
 | `gemini` | gemini-3.5-transcribe | 12 / 14 | 11.5 s (11.4–11.6) | Terragrunt, board pack |
 | `mlx-whisper` | **turbo** (default) | 12 / 14 | 14.5 s (13.4–15.5) | Terragrunt, board pack |
 | `faster-whisper` | **turbo** (default) | 12 / 14 | 24.2 s (24.1–24.6) | Terragrunt, board pack |
-| `parakeet` | parakeet-tdt-0.6b-v3 | 11 / 14 | 13.3 s (13.1–18.9) | Terragrunt, Raghunathan, board pack |
+| `parakeet` | parakeet-tdt-0.6b-v3 | 11 / 14 | 13.3 s (13.1–18.9) | Terragrunt, Raghunathan, **dropped a passage** |
 | `mlx-whisper` | large-v3 | 11 / 14 | 22.0 s (21.1–23.2) | AKS, 99.95% vs 99.5%, board pack |
 | `faster-whisper` | large-v3 | 11 / 14 | 69.5 s (62.6–78.2) | Terragrunt, AKS, board pack |
-| `elevenlabs` | scribe_v2 | **8 / 14** and 12 / 14 | 9.5 s (9.5–9.6) | varies — see below |
+
+**Every backend scored identically on every one of its runs.** Content is
+reproducible here; only the decode time moves.
 
 **Read the decode column as an order of magnitude, not a benchmark.** The range is
 there because the same model on the same file moves: `faster-whisper large-v3`
 spanned 62.6–78.2 s across three runs, a 25% spread. Two rows separated by less
 than a few seconds are not separated.
 
-**ElevenLabs returned a different transcript on each of two identical runs**, and
-the scores were 8 and 12. The worse run dropped a budget figure the better one
-kept. Every other backend here scored the same on every run. That is worth more
-than the score itself: a backend whose output is not stable is one you cannot
-diff against yesterday's, and nothing in the response says which run you got.
+**Seven of the eight mis-hear "board pack" as "board packs up"**, both local and
+hosted. It is grammatical, it is fluent, and it is wrong — which is why the check
+is kept and why the transcript ships with a "Worth checking" section instead of a
+claim to be correct. **Parakeet is the eighth and it is worse: it drops the
+passage entirely.** No "board pack", no "Raghunathan", no "typo" — a whole clause
+missing rather than mangled, which nothing in the output flags and no reader can
+notice from the transcript alone.
 
-**Every backend fails "board pack", every time.** All eight rows, both the local
-and the hosted ones, render it as "board packs up". It is grammatical, it is
-fluent, and it is wrong — which is exactly why the check is kept in the set and
-why the transcript ships with a "Worth checking" section instead of a claim to be
-correct.
+**ElevenLabs is the only backend whose output is not byte-stable**, but the
+instability is formatting, not content: 91.8% word-level similarity between two
+runs of the same file, and every difference is a number written one way or the
+other — "eighteen" against "18", "forty-two thousand three hundred euros" against
+"€42,300", "ninety-nine point nine five percent" against "99.95%". Both runs score
+13/14. It matters if you diff transcripts between runs, and not otherwise.
+
+> **An earlier version of this table said ElevenLabs scored 8 and 12 and "dropped a
+> budget figure".** That was a defect in `evals/accuracy/score.py`, not in
+> ElevenLabs: the figure checks matched digits only, so a correct spelled-out
+> transcription scored as a miss. The check was measuring whether a number had
+> been *digitised* rather than whether it had *survived* — the same failure this
+> project keeps finding in its own controls. Found by an independent fact-check of
+> this file, not by the test suite. Both forms now count, and the table above is
+> the re-scored result.
 
 ### What the numbers actually say
 
@@ -384,10 +401,10 @@ correct.
 `large-v3` scored 11/14 against turbo's 12/14 while taking 52% longer (22.0 s
 against 14.5 s), and its failure was the serious kind: the speaker corrects
 himself mid-sentence — "oh, actually, correction, that was 99.95%" — and
-`large-v3` renders the figure as "99.5%, not Not 99.5%". It keeps the word
-"correction" and loses the number the correction was about, which is worse than
-dropping the sentence, because what survives reads like a correction that was
-captured. In a document meant to record what was said, that is the worst
+`large-v3` renders the figure as "99.5%, not Not 99.5%" — losing the corrected
+number **and** the word "correction" that introduced it, so what survives is a
+sentence that contradicts itself with no sign that a correction was ever made. In
+a document meant to record what was said, that is the worst
 available failure.
 
 **Both Whisper backends therefore default to `turbo`.** `--model large-v3` is
@@ -401,12 +418,13 @@ this project has**. If large-v3 is better on your audio, measure it and use it.
 
 (`faster-whisper` resolves `turbo` to `mobiuslabsgmbh/faster-whisper-large-v3-turbo`
 rather than a Systran repo — a different publisher from its other short names.
-It ran at 24.2 s here. An earlier run of the same configuration recorded 50.7 s,
-which is the clearest single illustration of why the decode column carries a
-range: nothing about the model changed between them.)
+It ran at 24.2 s here. An earlier run of the same configuration recorded 50.7 s
+— the saved manifest is `.transcribe-eval/def-fw/…run.json`, `decode_seconds:
+50.69`, same backend and model — the clearest single illustration of why the
+decode column carries a range: nothing about the model changed between them.)
 
-**Nothing recovered "board pack".** All eight rows heard "board packs up". Some
-errors are in the audio, not the model.
+**Nothing recovered "board pack".** Seven rows heard "board packs up"; Parakeet
+dropped the passage containing it. Some errors are in the audio, not the model.
 
 **Terragrunt split the field three to five.** `openai`, `mlx-whisper large-v3`
 and `elevenlabs` got it; `gemini`, both turbo builds, `faster-whisper large-v3`
@@ -414,15 +432,18 @@ and `parakeet` produced "terror grunt" — two ordinary words, which is why no
 confidence threshold flags it.
 
 **Two backends lost the 99.95% distinction**: `mlx-whisper large-v3` and
-`elevenlabs`. Every other row kept it. All eight kept the *word* "correction",
-which is the trap — a transcript can preserve the fact that a correction happened
-and still get the corrected value wrong.
+`elevenlabs`. Every other row kept it — and the two failures are different in a
+way that matters. `elevenlabs` keeps the word "correction" and loses the figure,
+so the transcript records that a correction happened and gets the corrected value
+wrong. `mlx-whisper large-v3` loses both, so nothing survives to say a correction
+was ever made. The first is the more dangerous shape, because it reads as though
+the record is complete.
 
-**Scribe produced the fewest, longest segments** — 10, against 12 for Gemini, 15
-for OpenAI and 20–25 for the rest. That reads better as prose and matters if
-anything downstream assumes a segment is a fixed unit. It is also the backend
-whose output was not reproducible between runs, so treat the segment count as
-descriptive of one run.
+**Scribe produced the fewest, longest segments** — 10 on one run and 11 on the
+next, against 12 for Gemini, 15 for OpenAI and 20–25 for the rest. That reads
+better as prose and matters if anything downstream assumes a segment is a fixed
+unit. It is the one backend whose segmentation is not identical between runs, so
+the count describes a run rather than the engine.
 
 Its diarization returned one speaker here, correctly: this is a single-speaker
 recording. Two voices were separated in a dedicated live test.
@@ -533,9 +554,9 @@ Verified against Google's API reference and a live run on **2026-09-06**:
 
 **Gemini's `smart` mode is deliberately not offered.** It is the model's headline
 feature — it strips filler words, resolves spoken self-corrections and reflows
-the text — and Google's own reference says why it cannot be used here: *"Smart
-transcription (`"smart"`) is incompatible with `timestamp_granularities` and
-`diarization_mode`."* No word timing, no speaker labels, and a transcript that is
+the text — and Google's own reference says why it cannot be used here: *"Mode
+compatibility: Smart transcription (`"smart"`) cannot be combined with
+`timestamp_granularities` or `diarization_mode`."* No word timing, no speaker labels, and a transcript that is
 a model's tidied version of what was said rather than what was said. Cleaning up
 the prose belongs at the **notes** step, one stage later, where it is labelled a
 summary and checked. See `references/backends.md`.
@@ -561,7 +582,7 @@ wrong the first time a real response came back.
 | `parakeet` | **live** | 3 runs, `parakeet-mlx` on Apple Silicon |
 | `parakeet` on German | **live** | returned German, confirming the multilingual claim |
 | `parakeet` on a non-Apple runtime | **unrun** | needs `sherpa-onnx`; not built yet |
-| mixed-language recording | **live** | 43 s English→German through all five backends |
+| mixed-language recording | **live** | 43 s English→German through four backends |
 | `openai` transcribe | **live** | 2 runs, plus a dedicated live test |
 | `openai` `--task translate` | **unrun** | endpoint verified from OpenAI's docs only |
 | `elevenlabs` transcribe | **live** | 2 runs, plus a live test |
@@ -584,9 +605,10 @@ Three findings that only a live run produced, kept here as the argument for the 
   was the common one. Every unit test passed.
 - **Gemini's speaker labels use a colon.** Written as `spk_1` from the API reference; they
   are `spk:0`. The checker built from the reference still missed the real string.
-- **ElevenLabs is not reproducible.** Two identical runs returned different transcripts,
-  scoring 8/14 and 12/14; the worse one dropped a budget figure. Nothing in either response
-  indicates which you got.
+- **ElevenLabs is not byte-reproducible.** Two identical runs returned transcripts that
+  differ in how every number is written — "eighteen" against "18", "ninety-nine point nine
+  five percent" against "99.95%". Content is the same and both score 13/14; nothing in
+  either response indicates which rendering you got.
 - **Gemini does not translate**, despite being a Gemini model and despite "smart
   transcription" sounding like it might. Probed three ways on German audio — the shipped
   config, `language_codes: ["en-US"]`, and a plain instruction *"give the result in
@@ -685,7 +707,7 @@ does.
 
 ## Security posture
 
-Audited with `bandit`: **0 high, 0 medium, 6 low** across the shipped code.
+Audited with `bandit`: **0 high, 0 medium, 7 low** across the shipped code.
 Nothing is suppressed with `#nosec` — the medium findings were fixed, not
 annotated.
 
@@ -698,7 +720,7 @@ annotated.
   which speaks no other scheme: there is no URL to mis-parse and no plaintext
   fallback that could send the `Authorization` header in clear. A test asserts,
   on the AST, that `urlopen` has not come back.
-- **`B404` / `B603` (6 low) — shelling out to ffmpeg and a browser.** There is no
+- **`B404` / `B603` (7 low) — shelling out to ffmpeg and a browser.** There is no
   `shell=True`, no `os.system`, no `os.popen`; every call is list-form argv, so
   shell injection is not reachable. The only user values interpolated into an
   ffmpeg filter string are `--silence-threshold` and `--min-silence`, both

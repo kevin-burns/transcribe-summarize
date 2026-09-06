@@ -85,7 +85,7 @@ answer to it. Verified 2026-09-04 against PyPI and HuggingFace:
 | | `nemo_toolkit[asr]` | `sherpa-onnx` 1.13.7 |
 |---|---|---|
 | dependencies | torch + a large tree | **one** (`sherpa-onnx-core`) |
-| largest wheel | multi-GB install | **11.4 MB** |
+| wheel size | multi-GB install | **2.1 MB** arm64 mac, **4.4 MB** linux x86_64 |
 | prebuilt wheels | — | macOS arm64 + x86_64, Windows win32 + amd64, manylinux x86_64 + aarch64 |
 
 The model exists as a community ONNX export at
@@ -181,8 +181,8 @@ suggesting an *overlap* test with no number attached.
 ### The non-Apple runtime is still open
 
 The cross-platform path is **not built**, and NeMo is not the plan: `sherpa-onnx`
-is, for the reasons in the table above (one dependency against torch, an 11.4 MB
-wheel against a multi-GB tree). Tracked as `claude-skills-rq95`. Nothing here
+is, for the reasons in the table above (one dependency against torch; a 2.1 MB wheel on
+Apple Silicon and 4.4 MB on Linux x86_64, against a multi-GB tree). Tracked as `claude-skills-rq95`. Nothing here
 should be read as saying `nemo_toolkit[asr]` is coming.
 
 The old NeMo path (`nemo_toolkit[asr]`) is **not** verified and probably never
@@ -287,8 +287,8 @@ self-corrections ("let's meet Tuesday — no, Wednesday"), and reflows the text
 into paragraphs, bullet lists and formatted numbers. It is not exposed here, and
 the reason is in Google's own reference:
 
-> Smart transcription (`"smart"`) is incompatible with `timestamp_granularities`
-> and `diarization_mode`.
+> Mode compatibility: Smart transcription (`"smart"`) cannot be combined with
+> `timestamp_granularities` or `diarization_mode`.
 
 So it returns no word timing and no speaker labels. Three consequences, each
 disqualifying on its own:
@@ -467,6 +467,22 @@ one the detection reads, so there was nothing for a per-file decision to get
 wrong. A test clip short enough to be convenient is short enough to be a single
 window. Make the second language start after 30 seconds or the test is measuring
 nothing.
+
+**A defect in this project's own scorer, found 2026-09-06 by an independent
+fact-check rather than by the suite.** `evals/accuracy/checks.json` matched the
+budget figures as digits only (`42[,.]?300`), so ElevenLabs -- which wrote
+"forty-two thousand three hundred euros" on one run and "€42,300" on the next
+from the same audio -- scored a MISS for a figure it had transcribed perfectly.
+The check was measuring whether a number had been **digitised**, not whether it
+had **survived**. That put "ElevenLabs scored 8 and 12 and dropped a budget
+figure" into the README, which was wrong twice over: nothing was dropped, and its
+real score is 13/14 on both runs. Both forms now count, and every backend scores
+identically across its own runs.
+
+The transferable part: a check that requires a particular *form* will fail
+correct content, and it fails silently in the direction that looks like a finding
+-- a false defect attributed to a vendor, which is harder to doubt than a false
+pass.
 
 **`--multilingual` has not yet been shown to rescue a case that would otherwise
 fail.** On both mixed clips `faster-whisper large-v3` was already correct without

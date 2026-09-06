@@ -24,8 +24,8 @@ exists to avoid. Two small graspable groupers beat one branchy one.
 WHY `smart` MODE IS NOT OFFERED, though the API has it and it is the headline
 feature of the model. Verified in the API reference on 2026-09-06:
 
-    "Smart transcription (`"smart"`) is incompatible with
-     `timestamp_granularities` and `diarization_mode`."
+    "Mode compatibility: Smart transcription (`"smart"`) cannot be combined
+     with `timestamp_granularities` or `diarization_mode`."
 
 It removes filler words, resolves spoken self-corrections ("Tuesday -- no,
 Wednesday") and reflows the text into paragraphs and bullet lists. Three
@@ -147,7 +147,26 @@ def check_limits(path: Path) -> None:
         )
 
     duration = wav_duration(path)
-    if duration is not None and duration > MAX_DURATION_SECONDS:
+    if duration is None:
+        # DEFENCE IN DEPTH. This function's whole purpose is to refuse before
+        # the upload rather than after, and a duration it could not read is a
+        # cap it cannot enforce -- the 2 GB size check alone would let a
+        # two-hour file through to a 400 that arrives after the audio is on
+        # Google's servers. In this pipeline the file is always this tool's own
+        # 16 kHz mono PCM output, so `wave` should never fail; ffprobe is the
+        # second opinion rather than a routine path, and ffmpeg is already a
+        # hard prerequisite of the whole tool.
+        try:
+            from tslib import audio
+
+            duration = audio.probe_duration(path)
+        except Exception as exc:  # noqa: BLE001 -- any failure here means "unknown"
+            raise GeminiError(
+                f"could not read the duration of {path.name} with either the WAV header or "
+                f"ffprobe ({exc}). Refusing to upload rather than discover Gemini's "
+                f"{MAX_DURATION_SECONDS // 60}-minute limit after the audio has been sent."
+            ) from None
+    if duration > MAX_DURATION_SECONDS:
         raise GeminiError(
             f"{path.name} is {duration / 60:.1f} minutes after silence-trimming, over Gemini's "
             f"{MAX_DURATION_SECONDS // 60}-minute limit: word-level timestamps and speaker "
@@ -189,7 +208,15 @@ def parse_upload_url(raw: str) -> tuple[str, str]:
         raise GeminiError(f"upload URL is not https (scheme {parts.scheme!r}); refusing to send audio")
     if host != API_HOST and not host.endswith(".googleapis.com"):
         raise GeminiError(f"upload URL points at {host!r}, not a googleapis.com host; refusing to send audio")
-    return parts.netloc, parts.path + (f"?{parts.query}" if parts.query else "")
+    # Return the value that was CHECKED, not `parts.netloc`. netloc can carry
+    # userinfo ("user@host") or a port that the hostname check never saw, so
+    # connecting on it means connecting to something other than what was
+    # validated. TLS hostname verification would catch the mismatch, but as an
+    # SSLCertVerificationError rather than the clear refusal this module owes
+    # the caller -- and relying on a backstop to enforce a check we already
+    # wrote is the wrong way round.
+    netloc = f"{host}:{parts.port}" if parts.port else host
+    return netloc, parts.path + (f"?{parts.query}" if parts.query else "")
 
 
 def upload(path: Path, *, key: str, timeout: float = 600.0) -> str:
@@ -197,7 +224,7 @@ def upload(path: Path, *, key: str, timeout: float = 600.0) -> str:
     host, upload_path, body, headers = build_upload_start(path, key=key)
     start = _send(host, "POST", upload_path, body, headers, timeout=timeout, want_json=False)
 
-    location = start.get("X-Goog-Upload-URL") or start.get("Location")
+    location = start.get("x-goog-upload-url") or start.get("location")
     if not location:
         raise GeminiError("the Files API did not return an upload URL; nothing was sent")
 
@@ -266,7 +293,14 @@ def _send(
             # `from None`: chaining would attach the request, which holds the key.
             raise GeminiError(f"Gemini API returned HTTP {response.status}: {detail}") from None
         if not want_json:
-            return dict(response.headers.items())
+            # LOWER-CASED KEYS, deliberately. `response.headers` is an
+            # HTTPMessage, which is case-insensitive because HTTP header names
+            # are; `dict(...items())` is a plain dict, which is not. Measured:
+            # dict(m.items()).get("X-Goog-Upload-URL") is None when the server
+            # sent "x-goog-upload-url", while m.get(...) finds it. This worked
+            # against the live API only because Google happens to send the
+            # canonical casing, which the spec does not require.
+            return {name.lower(): value for name, value in response.headers.items()}
         return json.loads(raw.decode("utf-8"))
     except (OSError, http.client.HTTPException) as exc:
         raise GeminiError(f"could not reach the Gemini API: {exc}") from None

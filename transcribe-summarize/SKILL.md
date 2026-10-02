@@ -1,6 +1,7 @@
 ---
 name: transcribe-summarize
-description: Transcribe audio locally on macOS, Windows or Linux, and optionally write it up as meeting notes. Use whenever the user has an audio or video file and wants what was said - "transcribe this", "what was said on the call", "turn this recording into notes", "write up this meeting", "subtitle this", "get me an .srt", a voice memo, a dictation, an interview, a lecture, a podcast. Runs on-device by default with Whisper (mlx-whisper on Apple Silicon, faster-whisper everywhere else, Parakeet when asked for); Groq, OpenAI and ElevenLabs Scribe are available but only when named explicitly, and never without first stating what will be sent and what it will cost. Normalises and silence-trims the audio with ffmpeg before decoding, which measurably beats reaching for a bigger model, and filters the fabricated segments Whisper invents over silence. Also produces a factual meeting-notes document and a PDF. Not for writing prose or summarising text you already have.
+description: >-
+  Transcribe audio or video locally and optionally write it up as meeting notes: "transcribe this", "what was said on the call", "write up this meeting", subtitles or an .srt, a voice memo, interview, lecture or podcast. Runs on-device with Whisper by default; cloud services only when named, after saying what will be sent and what it costs. Also produces factual meeting notes and a PDF. Not for summarising text you already have.
 license: MIT
 ---
 
